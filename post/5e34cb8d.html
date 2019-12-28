@@ -1,0 +1,418 @@
+<!DOCTYPE html><html lang="en"><head><meta name="generator" content="Hexo 3.8.0"><meta http-equiv="content-type" content="text/html; charset=utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport"><meta content="yes" name="apple-mobile-web-app-capable"><meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"><meta content="telephone=no" name="format-detection"><meta name="description"><title>【机器学习】手撸一个BP神经网络（支持minibatch，Adam优化） | YOYO</title><link rel="stylesheet" type="text/css" href="/css/style.css"><link rel="Shortcut Icon" type="image/x-icon" href="/favicon.png"><link rel="stylesheet" href="//cdn.bootcss.com/font-awesome/4.7.0/css/font-awesome.min.css"><script type="text/javascript" src="//cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script></head><link rel="stylesheet" type="text/css" href="/css/customize.css"><link rel="stylesheet" type="text/css" href="/plugins/prettify/doxy.css"><script type="text/javascript" src="/js/ready.js" async></script><body><div class="mobile-head" id="mobile-head"><div class="navbar-icon"><span></span><span></span><span></span></div><div class="navbar-title"><a href="/">YOYO</a></div><div class="navbar-search"><!--= show a circle here--></div></div><div class="h-wrapper" id="menu"><nav class="h-head box"><div class="m-hdimg"><a class="hdimg img" href="/"><img class="nofancybox" src="/img/profile.jpg" width="128" height="128"></a><h1 class="ttl"><a href="/">YOYO</a></h1></div><p class="m-desc">一只小菜鸡,<br>nmd,why？</p><div class="m-nav"><ul><li><span class="dot">●</span><a href="/archives/">归档</a></li><li><span class="dot">●</span><a href="/categories/">分类</a></li><li><span class="dot">●</span><a href="/tags/">标签</a></li><li><span class="dot">●</span><a href="/about/">关于</a></li><li class="m-sch"><form class="form" id="j-formsch" action="/search" method="get"><input class="txt" type="text" id="local-search-input" name="q" value="搜索" onfocus="if(this.value=='搜索'){this.value='';}" onblur="if(this.value==''){this.value='搜索';}"></form></li></ul><div id="local-search-result"></div></div></nav></div><div id="back2Top"><a class="fa fa-arrow-up" title="Back to top" href="#"></a></div><div class="box" id="container"><div class="l-wrapper"><div class="l-content box"><div class="l-post l-post-art"><article class="p-art"><div class="p-header box"><h1 class="p-title">【机器学习】手撸一个BP神经网络（支持minibatch，Adam优化）</h1><div class="p-info"><span class="p-date"><i class="fa fa-calendar"></i><a href="/post/5e34cb8d.html">2019-04-15</a></span><span class="p-category"><i class="fa fa-folder"></i><a href="/categories/机器学习/">机器学习</a></span><span class="p-view" id="busuanzi_container_page_pv"><i class="fa fa-eye"></i><span id="busuanzi_value_page_pv"></span></span></div></div><div class="p-content"><p><img src="/img/1.jpg" alt="封面"></p>
+<p>每个函数以及变量的含义已经写在注释中。<br>使用数据：<a href="/download/spambase.csv">点击下载</a><br>测试结果：（第一列为训练集acc，第二列为测试集acc，每行的行数为神经网络层数，每层20个神经元）<br><img src="/img/BP.jpg" alt="结果"></p>
+<p>测试的时候层数不能太深，容易梯度爆炸<br>所需头文件：</p>
+<pre><code>#include &lt;iostream&gt;
+#include&lt;vector&gt;
+#include&lt;algorithm&gt;
+#include&lt;cmath&gt;
+#include&lt;fstream&gt;
+#include&lt;sstream&gt;
+</code></pre><p>BP类定义：</p>
+<pre><code>class BP
+{
+private:
+    vector&lt;vector&lt;vector&lt;double&gt;&gt;&gt; w;//需要学习的权重
+    vector&lt;vector&lt;double&gt;&gt;b;//每层神经网络的偏置
+    int layers;//层数
+    vector&lt;int&gt;nl;//每层神经元数量
+    int m;//样本总数
+    int act;//激活函数种类
+    double c;//正则化系数
+    double a;//学习率
+    int seed;//随机种子
+    bool adam;//是否使用adam优化
+    double testp;//训练集所占比重
+    vector&lt;vector&lt;double&gt;&gt;za;//记录每个神经元激活值
+    vector&lt;vector&lt;double&gt;&gt;zz;//记录每个神经元输入值
+    vector&lt;vector&lt;double&gt;&gt;dz;//记录每个神经元输入的偏导
+
+    double forward(double **x, int *y, int q); //第q个样本前向传播
+    void back(double **x, int *y, int q); //第q个样本反向传播
+    double relu(double x) { return max(0.0, x); } //以下为三种激活函数以及其导函数
+    double drelu(double x) { return x &gt;= 0 ? 1 : 0; }
+    double sigmod(double x) { return 1 / (1 + exp(-x)); }
+    double dsigmod(double x) { return sigmod(x)*(1 - sigmod(x)); }
+    double tanh(double x) { return std::tanh(x); }
+    double dtanh(double x) { return 1 - std::tanh(x)*std::tanh(x); }
+public:
+    BP(int layers, int m, int *nl, double a, double c, string act = &quot;relu&quot;, double testp = 0.7, bool adam = false, int seed = 0);
+    void init();
+    void train(double **x, int *y, int minibatch); //开始训练
+    double testacc(double**x, int *y); //计算测试集acc
+    double trainacc(double**x, int *y);//计算训练集acc
+    void norminput(double**x); //正则化输入
+};
+</code></pre><p>下面给出每个函数的定义：<br>构造函数，传进来层数不包括最后的输出层，所以在构造函数里加上，假设是二分类，所以最后一层只需要一个神经元。</p>
+<pre><code>BP::BP(int layers, int m, int *nl, double a, double c, string act, double testp, bool adam, int seed)
+{
+    this-&gt;layers = layers + 1;
+    this-&gt;m = m;
+    for (int i = 0; i &lt; layers; i++)
+        this-&gt;nl.emplace_back(nl[i]);
+    this-&gt;nl.emplace_back(1);
+    if (act == &quot;relu&quot;)
+        this-&gt;act = 1;
+    else if (act == &quot;tanh&quot;)
+        this-&gt;act = 2;
+    else if (act == &quot;sigmod&quot;)
+        this-&gt;act = 3;
+    this-&gt;seed = seed;
+    this-&gt;a = a;
+    this-&gt;c = c;
+    this-&gt;adam = adam;
+    this-&gt;testp = testp;
+}
+</code></pre><p>初始化函数，各种申请空间和随机初始化，不解释</p>
+<pre><code>void BP::init()
+{
+    srand(seed);
+    w = vector&lt; vector&lt;vector&lt;double&gt;&gt;&gt;(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+    {
+        w[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);
+        for (int j = 0; j &lt; nl[i + 1]; j++)
+        {
+            w[i][j] = vector&lt;double&gt;(nl[i]);
+            for (int k = 0; k &lt; nl[i]; k++)
+                w[i][j][k] = rand() % 1000 / (double)100000 - 0.005;
+        }
+    }
+
+    b = vector&lt;vector&lt;double&gt;&gt;(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+    {
+        b[i] = vector&lt;double&gt;(nl[i + 1]);
+        for (int j = 0; j &lt; nl[i + 1]; j++)
+            b[i][j] = rand() % 1000 / (double)100000 - 0.005;
+    }
+
+    za = vector&lt;vector&lt;double&gt;&gt;(layers);
+    for (int i = 0; i &lt; layers; i++)
+        za[i] = vector&lt;double&gt;(nl[i]);
+
+    zz = vector&lt;vector&lt;double&gt;&gt;(layers);
+    for (int i = 0; i &lt; layers; i++)
+        zz[i] = vector&lt;double&gt;(nl[i]);
+
+    dz = vector&lt;vector&lt;double&gt;&gt;(layers);
+    for (int i = 0; i &lt; layers; i++)
+        dz[i] = vector&lt;double&gt;(nl[i]);
+}
+</code></pre><p>单个样本前向传播，第一层就是x的输入，然后每层每个神经元依次计算输入与激活值，返回该样本的log损失误差，最后一层用sigmod计活函数</p>
+<pre><code>double BP::forward(double **x, int *y, int q)
+{
+    for (int i = 0; i &lt; nl[0]; i++)
+        za[0][i] = x[q][i];
+    for (int i = 0; i &lt; layers - 1; i++)
+    {
+        for (int j = 0; j &lt; nl[i + 1]; j++)
+        {
+            double z = 0;
+            for (int k = 0; k &lt; nl[i]; k++)
+                z += w[i][j][k] * za[i][k];
+            z += b[i][j];
+            zz[i + 1][j] = z;
+            if (i == layers - 2)
+                z = sigmod(z);
+            else
+            {
+                switch (act)
+                {
+                case 1:z = relu(z); break;
+                case 2:z = tanh(z); break;
+                case 3:z = sigmod(z); break;
+                }
+            }
+            za[i + 1][j] = z;
+        }
+    }
+    double J = y[q] * log(za[layers - 1][0] + 1e-8) + (1 - y[q])*log(1 - za[layers - 1][0] + 1e-8);
+    return J;
+}
+</code></pre><p>单个样本反向传播求导，最后一层的导数并不是定义为<code>a-y</code>，而是通过损失函数对a的导与sigmod函数对z的导相乘化简而来的</p>
+<pre><code>void BP::back(double**x, int *y, int q)
+{
+    dz[layers - 1][0] = za[layers - 1][0] - y[q];
+
+    for (int i = layers - 2; i &gt; 0; i--)
+    {
+        for (int j = 0; j &lt; nl[i]; j++)
+        {
+            double dd = 0;
+            for (int k = 0; k &lt; nl[i + 1]; k++)
+                dd += w[i][k][j] * dz[i + 1][k];
+            switch (act)
+            {
+            case 1:dd *= drelu(zz[i][j]); break;
+            case 2:dd *= dtanh(zz[i][j]); break;
+            case 3:dd *= sigmod(zz[i][j]); break;
+            }
+            dz[i][j] = dd;
+        }
+    }
+}
+</code></pre><p>训练函数，如果minibatch大于m，就直接等于m，dnum为一轮的次数，每求完一轮，计算损失函数，与上一轮相比，相差不大于1e-6，就结束训练,如果训练200轮还没收敛，也结束训练<br>其中dw为损失函数对每层的w的偏导，db同理，vdw与vdb为dw与db的指数加权平均数，sdw与sdb为(dw)²与(db)²的指数加权平均数，这四个变量用来做adam优化的梯度下降</p>
+<pre><code>void BP::train(double **x, int *y, int minibatch)
+{
+    vector&lt;vector&lt;vector&lt;double&gt;&gt;&gt; dw(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+    {
+        dw[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);
+        for (int j = 0; j &lt; nl[i + 1]; j++)
+            dw[i][j] = vector&lt;double&gt;(nl[i]);
+    }
+    vector&lt;vector&lt;double&gt;&gt;db(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+        db[i] = vector&lt;double&gt;(nl[i + 1]);
+    vector &lt;vector&lt;vector&lt;double&gt;&gt;&gt;vdw(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+    {
+        vdw[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);
+        for (int j = 0; j &lt; nl[i + 1]; j++)
+            vdw[i][j] = vector&lt;double&gt;(nl[i], 0);
+    }
+    vector&lt;vector&lt;double&gt;&gt;vdb(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+        vdb[i] = vector&lt;double&gt;(nl[i + 1], 0);
+    vector &lt;vector&lt;vector&lt;double&gt;&gt;&gt;sdw(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+    {
+        sdw[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);
+        for (int j = 0; j &lt; nl[i + 1]; j++)
+            sdw[i][j] = vector&lt;double&gt;(nl[i], 0);
+    }
+    vector&lt;vector&lt;double&gt;&gt;sdb(layers - 1);
+    for (int i = 0; i &lt; layers - 1; i++)
+        sdb[i] = vector&lt;double&gt;(nl[i + 1], 0);
+
+
+    double Jlast = 0;
+    double Jnow = 100000;
+    int t = 1;
+    int dnum = (int)(m*testp) % minibatch == 0 ? (m*testp) / minibatch : (m*testp) / minibatch + 1;
+    int anum = 0;
+    while (abs(Jlast - Jnow) &gt; 1e-5)
+    {
+
+        Jlast = Jnow;
+        Jnow = 0;
+        int m1 = 0, m2 = min((int)(m*testp), m1 + minibatch);
+
+        for (int ci = 0; ci &lt; dnum; ci++)
+        {
+            for (int i = 0; i &lt; layers - 1; i++)
+                for (int j = 0; j &lt; nl[i + 1]; j++)
+                    for (int k = 0; k &lt; nl[i]; k++)
+                        dw[i][j][k] = 0;
+            for (int i = 1; i &lt; layers; i++)
+                for (int j = 0; j &lt; nl[i]; j++)
+                    db[i - 1][j] = 0;
+            //cout &lt;&lt; &quot;epoch &quot; &lt;&lt; t/dnum +1 &lt;&lt; &quot;: &quot; &lt;&lt; ci + 1 &lt;&lt; &quot;/&quot; &lt;&lt; dnum &lt;&lt; endl;
+            if (ci != 0)
+                m1 += minibatch, m2 = min((int)(m*testp), m2 + minibatch);
+            double J = 0;
+
+            for (int i = m1; i &lt; m2; i++)
+            {
+
+                double j = forward(x, y, i);
+                //cout &lt;&lt; j &lt;&lt; endl;
+                J += j;
+                back(x, y, i);
+                for (int i = 0; i &lt; layers - 1; i++)
+                    for (int j = 0; j &lt; nl[i + 1]; j++)
+                        for (int k = 0; k &lt; nl[i]; k++)
+                            dw[i][j][k] += dz[i + 1][j] * za[i][k];
+                for (int i = 1; i &lt; layers; i++)
+                    for (int j = 0; j &lt; nl[i]; j++)
+                        db[i - 1][j] += dz[i][j];
+            }
+
+            J /= -(double)(m2 - m1);
+
+            Jnow += J;
+            for (int i = 0; i &lt; layers - 1; i++)
+                for (int j = 0; j &lt; nl[i + 1]; j++)
+                    for (int k = 0; k &lt; nl[i]; k++)
+                    {
+                        dw[i][j][k] = dw[i][j][k] / (double)(m2 - m1) + w[i][j][k] * c / (m2 - m1);
+                        if (!adam)
+                            w[i][j][k] -= a * dw[i][j][k];
+                        else
+                        {
+                            vdw[i][j][k] = 0.9*vdw[i][j][k] + 0.1*dw[i][j][k];
+                            sdw[i][j][k] = 0.999*sdw[i][j][k] + 0.001*dw[i][j][k] * dw[i][j][k];
+                            double vdwt = vdw[i][j][k] / (1 - pow(0.9, t));
+                            double sdwt = sdw[i][j][k] / (1 - pow(0.999, t));
+                            w[i][j][k] -= a * vdwt / sqrt(sdwt + 1e-8);
+                        }
+                    }
+            for (int i = 1; i &lt; layers; i++)
+                for (int j = 0; j &lt; nl[i]; j++)
+                {
+                    db[i - 1][j] = db[i - 1][j] / (double)(m2 - m1);
+                    if (!adam)
+                        b[i - 1][j] -= a * db[i - 1][j];
+                    else
+                    {
+                        vdb[i - 1][j] = 0.9*vdb[i - 1][j] + 0.1*db[i - 1][j];
+                        sdb[i - 1][j] = 0.999*sdb[i - 1][j] + 0.001*db[i - 1][j] * db[i - 1][j];
+                        double vdbt = vdb[i - 1][j] / (1 - pow(0.9, t));
+                        double sdbt = sdb[i - 1][j] / (1 - pow(0.999, t));
+                        b[i - 1][j] -= a * vdbt / (sqrt(sdbt + 1e-8));
+                        //cout &lt;&lt; db[i - 1][j] &lt;&lt; &quot; &quot; &lt;&lt; vdbt / (sqrt(sdbt + 1e-8)) &lt;&lt; endl;
+                    }
+                }
+            t++;
+        }
+
+        //cout &lt;&lt; Jnow &lt;&lt; endl;
+        double JC = 0;
+        for (int i = 0; i &lt; layers - 1; i++)
+            for (int j = 0; j &lt; nl[i + 1]; j++)
+                for (int k = 0; k &lt; nl[i]; k++)
+                    JC += w[i][j][k] * w[i][j][k];
+        JC *= c;
+        JC /= 2 * (m*testp);
+        Jnow += JC;
+
+        //printf(&quot;%lf %lf\n&quot;, Jnow, Jlast);
+        if (t / dnum &gt;= 200)
+            break;
+    }
+}
+</code></pre><p>两个测试函数，没啥好说的</p>
+<pre><code>double BP::testacc(double**x, int *y)
+{
+    int m1 = (int)(m*testp);
+    int tr = 0;
+    for (int i = m1; i &lt; m; i++)
+    {
+        forward(x, y, i);
+        if (za[layers - 1][0] &gt;= 0.5&amp;&amp;y[i] == 1)
+            tr++;
+        if (za[layers - 1][0] &lt; 0.5&amp;&amp;y[i] == 0)
+            tr++;
+    }
+    return tr / (double)(m - m1);
+}
+double BP::trainacc(double**x, int *y)
+{
+    int tr = 0;
+    for (int i = 0; i &lt; (int)(m*testp); i++)
+    {
+        forward(x, y, i);
+        if (za[layers - 1][0] &gt;= 0.5&amp;&amp;y[i] == 1)
+            tr++;
+        if (za[layers - 1][0] &lt; 0.5&amp;&amp;y[i] == 0)
+            tr++;
+    }
+    return tr / (double)(m*testp);
+}
+</code></pre><p>正则化输入，每个x减去均值并除以范围（标准差也可以）</p>
+<pre><code>void BP::norminput(double**x)
+{
+    for (int i = 0; i &lt; nl[0]; i++)
+    {
+        double avg = 0;
+        double maxx = 0;
+        double minn = 99999999;
+        for (int j = 0; j &lt; m; j++)
+        {
+            avg += x[j][i];
+            maxx = max(maxx, x[j][i]);
+            minn = min(minn, x[j][i]);
+        }
+        avg /= m;
+        for (int j = 0; j &lt; m; j++)
+            x[j][i] = (x[j][i] - avg) / (maxx - minn);
+    }
+}
+</code></pre><p>最后是主函数，读入文件，尝试测试不同层数的神经网络</p>
+<pre><code>int main() {
+    ifstream f;
+    f.open(&quot;spambase.csv&quot;);
+    if (!f.is_open())
+    {
+        cout &lt;&lt; &quot;open error&quot; &lt;&lt; endl;
+        return 0;
+    }
+    string line;
+    int m = 0;
+    int n = 0;
+    double **x = new double*[10000];
+    int *y = new int[10000];
+    while (getline(f, line))
+    {
+        int n1 = 0;
+        x[m] = new double[1000];
+        istringstream sin(line);
+        string temp;
+        while (getline(sin, temp, &#39;,&#39;))
+        {
+            x[m][n1] = atof(temp.c_str());
+            //cout &lt;&lt; x[m][n1] &lt;&lt; endl;
+            n1++;
+        }
+        y[m] = x[m][n1 - 1] == -1 ? 0 : 1;
+
+        m++;
+        n = n1 - 1;
+    }
+    f.close();
+    int *nl = new int[11];
+    nl[0] = n;
+    nl[1] = 20;
+    nl[2] = 20;
+    nl[3] = 20;
+    nl[4] = 20;
+    nl[5] = 20;
+    nl[6] = 20;
+    for (int i = 1; i &lt;= 6; i++)
+    {
+        BP B(i, m, nl, 0.01, 0.0001, &quot;tanh&quot;, 0.7, true, 0);
+        B.init();
+        B.norminput(x);
+        B.train(x, y, 64);
+        double trainacc = B.trainacc(x, y);
+        double acc = B.testacc(x, y);
+        printf(&quot;%lf %lf\n&quot;, trainacc, acc);
+        //system(&quot;pause&quot;);
+    }
+}
+</code></pre></div></article><div class="p-info box"><span class="p-tags"><i class="fa fa-tags"></i><a href="/tags/手撸/">手撸</a><a href="/tags/机器学习/">机器学习</a></span></div></div><section class="p-ext"><div class="l-pager l-pager-dtl box"><a class="next" href="/post/723f47a8.html">【机器学习】手撸一个逻辑回归 &gt;</a></div><div id="valine-comment"><style type="text/css">.v * { color: #CECECE; }
+.v a { color: #0F9FB4; }
+.v a:hover { color: #216C73; }
+.v li { list-style: inherit; }
+.v .vwrap { border: 1px solid #223441; border-radius: 0; }
+.v .vwrap:hover { box-shadow: 0 0 6px 1px #223441; }
+.v .vbtn { border-radius: 0; color: #cecece; background: none; }
+.v .vlist .vcard .vh { border-bottom-color: #293D4E; }
+.v .vwrap .vheader .vinput { border-bottom-color: #223441; }
+.v .vwrap .vheader .vinput:focus { border-bottom-color: #339EB4; }
+.v code, .v pre,.v .vlist .vcard .vhead .vsys { background: #203240; }
+.v .vlist .vcard .vcontent.expand:before { background: linear-gradient(180deg,hsla(206,33%,19%,0),hsla(206,33%,19%,.9)); }
+.v .vlist .vcard .vcontent.expand:after { background: hsla(206,33%,19%,.9); }</style><div id="vcomment"></div><script src="//cdn1.lncld.net/static/js/3.0.4/av-min.js"></script><script src="//unpkg.com/valine@latest/dist/Valine.min.js"></script><script>var notify = 'true' == true ? true : false;
+var verify = 'false' == true ? true : false;
+var GUEST_INFO = ['nick','mail','link'];
+var guest_info = 'nick,mail,link'.split(',').filter(function(item){
+  return GUEST_INFO.indexOf(item) > -1
+});
+guest_info = guest_info.length == 0 ? GUEST_INFO :guest_info;
+window.valine = new Valine({
+  el:'#vcomment',
+  notify:notify,
+  verify:verify,
+  appId:'faWhCflfYAf4DSBY6i31K1r7-gzGzoHsz',
+  appKey:'CKuisu7G1GD4VMH48mNdbWjX',
+  placeholder:'随便说的什么吧，留下邮箱的话，被回复会有邮件提醒哦ヾ(o◕∀◕)ﾉヾ',
+  avatar:'identicon',
+  guest_info:guest_info,
+  pageSize:'10'
+})</script></div></section><footer><p>Copyright © 2016 - 2019 <a href="/." rel="nofollow">YOYO</a><br><span id="busuanzi_container_site_uv"><i class="fa fa-user"></i><span id="busuanzi_value_site_uv"></span></span> <span id="busuanzi_container_site_pv"><i class="fa fa-eye"></i><span id="busuanzi_value_site_pv"></span></span> | Powered by<a rel="nofollow" target="_blank" href="https://hexo.io"> Hexo.</a>Theme with<a rel="nofollow" target="_blank" href="https://github.com/litreily/snark-hexo"> snark.</a></p></footer></div></div></div><script type="text/javascript" src="/plugins/prettify/prettify.js"></script><script type="text/javascript" src="/js/search.js"></script><script type="text/javascript" src="/js/top.js"></script><script type="text/javascript" src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js" async></script><script>var search_path = 'search.xml';
+if (search_path.length == 0) {
+    search_path = 'search.xml';
+}
+var path = '/' + search_path;
+searchFunc(path, 'local-search-input', 'local-search-result');
+</script><script type="text/javascript" src="//cdn.bootcss.com/fancybox/3.3.5/jquery.fancybox.min.js" async></script><script type="text/javascript" src="/js/fancybox.js?v=0.0.1" async></script><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/3.3.5/jquery.fancybox.min.css"></body></html>

@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search> 
+  
+  
+    
+    <entry>
+      <title>【机器学习】手撸一个BP神经网络（支持minibatch，Adam优化）</title>
+      <link href="/post/5e34cb8d.html"/>
+      <url>/post/5e34cb8d.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p><img src="/img/1.jpg" alt="封面"></p><p>每个函数以及变量的含义已经写在注释中。<br>使用数据：<a href="/download/spambase.csv">点击下载</a><br>测试结果：（第一列为训练集acc，第二列为测试集acc，每行的行数为神经网络层数，每层20个神经元）<br><img src="/img/BP.jpg" alt="结果"></p><p>测试的时候层数不能太深，容易梯度爆炸<br>所需头文件：</p><pre><code>#include &lt;iostream&gt;#include&lt;vector&gt;#include&lt;algorithm&gt;#include&lt;cmath&gt;#include&lt;fstream&gt;#include&lt;sstream&gt;</code></pre><p>BP类定义：</p><pre><code>class BP{private:    vector&lt;vector&lt;vector&lt;double&gt;&gt;&gt; w;//需要学习的权重    vector&lt;vector&lt;double&gt;&gt;b;//每层神经网络的偏置    int layers;//层数    vector&lt;int&gt;nl;//每层神经元数量    int m;//样本总数    int act;//激活函数种类    double c;//正则化系数    double a;//学习率    int seed;//随机种子    bool adam;//是否使用adam优化    double testp;//训练集所占比重    vector&lt;vector&lt;double&gt;&gt;za;//记录每个神经元激活值    vector&lt;vector&lt;double&gt;&gt;zz;//记录每个神经元输入值    vector&lt;vector&lt;double&gt;&gt;dz;//记录每个神经元输入的偏导    double forward(double **x, int *y, int q); //第q个样本前向传播    void back(double **x, int *y, int q); //第q个样本反向传播    double relu(double x) { return max(0.0, x); } //以下为三种激活函数以及其导函数    double drelu(double x) { return x &gt;= 0 ? 1 : 0; }    double sigmod(double x) { return 1 / (1 + exp(-x)); }    double dsigmod(double x) { return sigmod(x)*(1 - sigmod(x)); }    double tanh(double x) { return std::tanh(x); }    double dtanh(double x) { return 1 - std::tanh(x)*std::tanh(x); }public:    BP(int layers, int m, int *nl, double a, double c, string act = &quot;relu&quot;, double testp = 0.7, bool adam = false, int seed = 0);    void init();    void train(double **x, int *y, int minibatch); //开始训练    double testacc(double**x, int *y); //计算测试集acc    double trainacc(double**x, int *y);//计算训练集acc    void norminput(double**x); //正则化输入};</code></pre><p>下面给出每个函数的定义：<br>构造函数，传进来层数不包括最后的输出层，所以在构造函数里加上，假设是二分类，所以最后一层只需要一个神经元。</p><pre><code>BP::BP(int layers, int m, int *nl, double a, double c, string act, double testp, bool adam, int seed){    this-&gt;layers = layers + 1;    this-&gt;m = m;    for (int i = 0; i &lt; layers; i++)        this-&gt;nl.emplace_back(nl[i]);    this-&gt;nl.emplace_back(1);    if (act == &quot;relu&quot;)        this-&gt;act = 1;    else if (act == &quot;tanh&quot;)        this-&gt;act = 2;    else if (act == &quot;sigmod&quot;)        this-&gt;act = 3;    this-&gt;seed = seed;    this-&gt;a = a;    this-&gt;c = c;    this-&gt;adam = adam;    this-&gt;testp = testp;}</code></pre><p>初始化函数，各种申请空间和随机初始化，不解释</p><pre><code>void BP::init(){    srand(seed);    w = vector&lt; vector&lt;vector&lt;double&gt;&gt;&gt;(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)    {        w[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);        for (int j = 0; j &lt; nl[i + 1]; j++)        {            w[i][j] = vector&lt;double&gt;(nl[i]);            for (int k = 0; k &lt; nl[i]; k++)                w[i][j][k] = rand() % 1000 / (double)100000 - 0.005;        }    }    b = vector&lt;vector&lt;double&gt;&gt;(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)    {        b[i] = vector&lt;double&gt;(nl[i + 1]);        for (int j = 0; j &lt; nl[i + 1]; j++)            b[i][j] = rand() % 1000 / (double)100000 - 0.005;    }    za = vector&lt;vector&lt;double&gt;&gt;(layers);    for (int i = 0; i &lt; layers; i++)        za[i] = vector&lt;double&gt;(nl[i]);    zz = vector&lt;vector&lt;double&gt;&gt;(layers);    for (int i = 0; i &lt; layers; i++)        zz[i] = vector&lt;double&gt;(nl[i]);    dz = vector&lt;vector&lt;double&gt;&gt;(layers);    for (int i = 0; i &lt; layers; i++)        dz[i] = vector&lt;double&gt;(nl[i]);}</code></pre><p>单个样本前向传播，第一层就是x的输入，然后每层每个神经元依次计算输入与激活值，返回该样本的log损失误差，最后一层用sigmod计活函数</p><pre><code>double BP::forward(double **x, int *y, int q){    for (int i = 0; i &lt; nl[0]; i++)        za[0][i] = x[q][i];    for (int i = 0; i &lt; layers - 1; i++)    {        for (int j = 0; j &lt; nl[i + 1]; j++)        {            double z = 0;            for (int k = 0; k &lt; nl[i]; k++)                z += w[i][j][k] * za[i][k];            z += b[i][j];            zz[i + 1][j] = z;            if (i == layers - 2)                z = sigmod(z);            else            {                switch (act)                {                case 1:z = relu(z); break;                case 2:z = tanh(z); break;                case 3:z = sigmod(z); break;                }            }            za[i + 1][j] = z;        }    }    double J = y[q] * log(za[layers - 1][0] + 1e-8) + (1 - y[q])*log(1 - za[layers - 1][0] + 1e-8);    return J;}</code></pre><p>单个样本反向传播求导，最后一层的导数并不是定义为<code>a-y</code>，而是通过损失函数对a的导与sigmod函数对z的导相乘化简而来的</p><pre><code>void BP::back(double**x, int *y, int q){    dz[layers - 1][0] = za[layers - 1][0] - y[q];    for (int i = layers - 2; i &gt; 0; i--)    {        for (int j = 0; j &lt; nl[i]; j++)        {            double dd = 0;            for (int k = 0; k &lt; nl[i + 1]; k++)                dd += w[i][k][j] * dz[i + 1][k];            switch (act)            {            case 1:dd *= drelu(zz[i][j]); break;            case 2:dd *= dtanh(zz[i][j]); break;            case 3:dd *= sigmod(zz[i][j]); break;            }            dz[i][j] = dd;        }    }}</code></pre><p>训练函数，如果minibatch大于m，就直接等于m，dnum为一轮的次数，每求完一轮，计算损失函数，与上一轮相比，相差不大于1e-6，就结束训练,如果训练200轮还没收敛，也结束训练<br>其中dw为损失函数对每层的w的偏导，db同理，vdw与vdb为dw与db的指数加权平均数，sdw与sdb为(dw)²与(db)²的指数加权平均数，这四个变量用来做adam优化的梯度下降</p><pre><code>void BP::train(double **x, int *y, int minibatch){    vector&lt;vector&lt;vector&lt;double&gt;&gt;&gt; dw(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)    {        dw[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);        for (int j = 0; j &lt; nl[i + 1]; j++)            dw[i][j] = vector&lt;double&gt;(nl[i]);    }    vector&lt;vector&lt;double&gt;&gt;db(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)        db[i] = vector&lt;double&gt;(nl[i + 1]);    vector &lt;vector&lt;vector&lt;double&gt;&gt;&gt;vdw(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)    {        vdw[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);        for (int j = 0; j &lt; nl[i + 1]; j++)            vdw[i][j] = vector&lt;double&gt;(nl[i], 0);    }    vector&lt;vector&lt;double&gt;&gt;vdb(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)        vdb[i] = vector&lt;double&gt;(nl[i + 1], 0);    vector &lt;vector&lt;vector&lt;double&gt;&gt;&gt;sdw(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)    {        sdw[i] = vector&lt;vector&lt;double&gt;&gt;(nl[i + 1]);        for (int j = 0; j &lt; nl[i + 1]; j++)            sdw[i][j] = vector&lt;double&gt;(nl[i], 0);    }    vector&lt;vector&lt;double&gt;&gt;sdb(layers - 1);    for (int i = 0; i &lt; layers - 1; i++)        sdb[i] = vector&lt;double&gt;(nl[i + 1], 0);    double Jlast = 0;    double Jnow = 100000;    int t = 1;    int dnum = (int)(m*testp) % minibatch == 0 ? (m*testp) / minibatch : (m*testp) / minibatch + 1;    int anum = 0;    while (abs(Jlast - Jnow) &gt; 1e-5)    {        Jlast = Jnow;        Jnow = 0;        int m1 = 0, m2 = min((int)(m*testp), m1 + minibatch);        for (int ci = 0; ci &lt; dnum; ci++)        {            for (int i = 0; i &lt; layers - 1; i++)                for (int j = 0; j &lt; nl[i + 1]; j++)                    for (int k = 0; k &lt; nl[i]; k++)                        dw[i][j][k] = 0;            for (int i = 1; i &lt; layers; i++)                for (int j = 0; j &lt; nl[i]; j++)                    db[i - 1][j] = 0;            //cout &lt;&lt; &quot;epoch &quot; &lt;&lt; t/dnum +1 &lt;&lt; &quot;: &quot; &lt;&lt; ci + 1 &lt;&lt; &quot;/&quot; &lt;&lt; dnum &lt;&lt; endl;            if (ci != 0)                m1 += minibatch, m2 = min((int)(m*testp), m2 + minibatch);            double J = 0;            for (int i = m1; i &lt; m2; i++)            {                double j = forward(x, y, i);                //cout &lt;&lt; j &lt;&lt; endl;                J += j;                back(x, y, i);                for (int i = 0; i &lt; layers - 1; i++)                    for (int j = 0; j &lt; nl[i + 1]; j++)                        for (int k = 0; k &lt; nl[i]; k++)                            dw[i][j][k] += dz[i + 1][j] * za[i][k];                for (int i = 1; i &lt; layers; i++)                    for (int j = 0; j &lt; nl[i]; j++)                        db[i - 1][j] += dz[i][j];            }            J /= -(double)(m2 - m1);            Jnow += J;            for (int i = 0; i &lt; layers - 1; i++)                for (int j = 0; j &lt; nl[i + 1]; j++)                    for (int k = 0; k &lt; nl[i]; k++)                    {                        dw[i][j][k] = dw[i][j][k] / (double)(m2 - m1) + w[i][j][k] * c / (m2 - m1);                        if (!adam)                            w[i][j][k] -= a * dw[i][j][k];                        else                        {                            vdw[i][j][k] = 0.9*vdw[i][j][k] + 0.1*dw[i][j][k];                            sdw[i][j][k] = 0.999*sdw[i][j][k] + 0.001*dw[i][j][k] * dw[i][j][k];                            double vdwt = vdw[i][j][k] / (1 - pow(0.9, t));                            double sdwt = sdw[i][j][k] / (1 - pow(0.999, t));                            w[i][j][k] -= a * vdwt / sqrt(sdwt + 1e-8);                        }                    }            for (int i = 1; i &lt; layers; i++)                for (int j = 0; j &lt; nl[i]; j++)                {                    db[i - 1][j] = db[i - 1][j] / (double)(m2 - m1);                    if (!adam)                        b[i - 1][j] -= a * db[i - 1][j];                    else                    {                        vdb[i - 1][j] = 0.9*vdb[i - 1][j] + 0.1*db[i - 1][j];                        sdb[i - 1][j] = 0.999*sdb[i - 1][j] + 0.001*db[i - 1][j] * db[i - 1][j];                        double vdbt = vdb[i - 1][j] / (1 - pow(0.9, t));                        double sdbt = sdb[i - 1][j] / (1 - pow(0.999, t));                        b[i - 1][j] -= a * vdbt / (sqrt(sdbt + 1e-8));                        //cout &lt;&lt; db[i - 1][j] &lt;&lt; &quot; &quot; &lt;&lt; vdbt / (sqrt(sdbt + 1e-8)) &lt;&lt; endl;                    }                }            t++;        }        //cout &lt;&lt; Jnow &lt;&lt; endl;        double JC = 0;        for (int i = 0; i &lt; layers - 1; i++)            for (int j = 0; j &lt; nl[i + 1]; j++)                for (int k = 0; k &lt; nl[i]; k++)                    JC += w[i][j][k] * w[i][j][k];        JC *= c;        JC /= 2 * (m*testp);        Jnow += JC;        //printf(&quot;%lf %lf\n&quot;, Jnow, Jlast);        if (t / dnum &gt;= 200)            break;    }}</code></pre><p>两个测试函数，没啥好说的</p><pre><code>double BP::testacc(double**x, int *y){    int m1 = (int)(m*testp);    int tr = 0;    for (int i = m1; i &lt; m; i++)    {        forward(x, y, i);        if (za[layers - 1][0] &gt;= 0.5&amp;&amp;y[i] == 1)            tr++;        if (za[layers - 1][0] &lt; 0.5&amp;&amp;y[i] == 0)            tr++;    }    return tr / (double)(m - m1);}double BP::trainacc(double**x, int *y){    int tr = 0;    for (int i = 0; i &lt; (int)(m*testp); i++)    {        forward(x, y, i);        if (za[layers - 1][0] &gt;= 0.5&amp;&amp;y[i] == 1)            tr++;        if (za[layers - 1][0] &lt; 0.5&amp;&amp;y[i] == 0)            tr++;    }    return tr / (double)(m*testp);}</code></pre><p>正则化输入，每个x减去均值并除以范围（标准差也可以）</p><pre><code>void BP::norminput(double**x){    for (int i = 0; i &lt; nl[0]; i++)    {        double avg = 0;        double maxx = 0;        double minn = 99999999;        for (int j = 0; j &lt; m; j++)        {            avg += x[j][i];            maxx = max(maxx, x[j][i]);            minn = min(minn, x[j][i]);        }        avg /= m;        for (int j = 0; j &lt; m; j++)            x[j][i] = (x[j][i] - avg) / (maxx - minn);    }}</code></pre><p>最后是主函数，读入文件，尝试测试不同层数的神经网络</p><pre><code>int main() {    ifstream f;    f.open(&quot;spambase.csv&quot;);    if (!f.is_open())    {        cout &lt;&lt; &quot;open error&quot; &lt;&lt; endl;        return 0;    }    string line;    int m = 0;    int n = 0;    double **x = new double*[10000];    int *y = new int[10000];    while (getline(f, line))    {        int n1 = 0;        x[m] = new double[1000];        istringstream sin(line);        string temp;        while (getline(sin, temp, &#39;,&#39;))        {            x[m][n1] = atof(temp.c_str());            //cout &lt;&lt; x[m][n1] &lt;&lt; endl;            n1++;        }        y[m] = x[m][n1 - 1] == -1 ? 0 : 1;        m++;        n = n1 - 1;    }    f.close();    int *nl = new int[11];    nl[0] = n;    nl[1] = 20;    nl[2] = 20;    nl[3] = 20;    nl[4] = 20;    nl[5] = 20;    nl[6] = 20;    for (int i = 1; i &lt;= 6; i++)    {        BP B(i, m, nl, 0.01, 0.0001, &quot;tanh&quot;, 0.7, true, 0);        B.init();        B.norminput(x);        B.train(x, y, 64);        double trainacc = B.trainacc(x, y);        double acc = B.testacc(x, y);        printf(&quot;%lf %lf\n&quot;, trainacc, acc);        //system(&quot;pause&quot;);    }}</code></pre>]]></content>
+      
+      
+      <categories>
+          
+          <category> 机器学习 </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> 手撸 </tag>
+            
+            <tag> 机器学习 </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>【机器学习】手撸一个逻辑回归</title>
+      <link href="/post/723f47a8.html"/>
+      <url>/post/723f47a8.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p>flag为false时为测试集，为true时为训练集</p><p>J函数：logistics代价函数，为对数代价。</p><p>logistics函数：x特征，y标签，m1样本起始点，m2样本结束点，n特征数，a学习率，c正则化参数，返回n+1长度的数组，为训练好的参数。</p><p>kfold函数：x特征，y标签，n特征数，m样本数，k折数，返回k折平均acc。</p><p>测试数据： <a href="/download/breast-w.csv">点击下载</a><br>数据说明：第10列为标签，-1与1，前九列为特征。</p><p>代码运行结果：（5折交叉验证）<br><img src="/img/5.png" alt="结果"><br>代码：</p><pre><code>#include &lt;iostream&gt;#include&lt;vector&gt;#include&lt;queue&gt;#include&lt;algorithm&gt;#include&lt;string&gt;#include&lt;vector&gt;#include&lt;stack&gt;#include&lt;cmath&gt;#include&lt;set&gt;#include&lt;string.h&gt;#include&lt;fstream&gt;#include&lt;sstream&gt;#include&lt;ctime&gt;using namespace std;bool flag[10000];double J(double *s, double **x, int *y,int m1, int m2, int n,double c){    double res = 0;    int fa = 0;    for (int i = m1; i &lt; m2; i++)    {        if (!flag[i])        {            fa++;            continue;        }        double z = -s[0];        for (int j = 1; j &lt;= n; j++)            z -= s[j] * x[i][j-1];        //cout &lt;&lt; z &lt;&lt; endl;        double h = (double)1 / (1 + exp(z));        //cout &lt;&lt; h &lt;&lt; endl;        double cost = 0;        if (y[i] == 1)            cost = -log(h);        else            cost = -log(1 - h);        //cout &lt;&lt; cost &lt;&lt; endl;        res += cost;    }    res /= m2-m1-fa;    double res2 = 0;    for (int i = 1; i &lt;= n; i++)        res2 += s[i] * s[i];    res2 *= c;    res2 /= 2 * (m2 - m1 - fa);    return res + res2;}double* logistic(double **x, int *y, int n,int m1, int m2,double a,double c){    double *s = new double[n + 1];//θ    srand(time(0));    for (int i = 0; i &lt; n + 1; i++)        s[i] = rand()%100/(double)100;//随机初始化    cout &lt;&lt; s[0] &lt;&lt; endl;    double last = 0;    double now = J(s, x, y, m1,m2, n, c);    double *temp = new double[n + 1];    while (abs(last - now) &gt; 0.00001)    {        //cout &lt;&lt;  now &lt;&lt; endl;        for (int i = 0; i &lt;= n; i++)        {            double mqiuhe = 0;            int fa = 0;            for (int k = m1; k &lt; m2; k++)            {                if (!flag[k])                {                    fa++;                    continue;                }                double z = -s[0];                for (int j = 1; j &lt;= n; j++)                    z -= s[j] * x[k][j-1];                double h = (double)1 / (1 + exp(z));                h -= y[k];                if(i!=0)                    h *= x[k][i-1];                mqiuhe += h;            }            mqiuhe /= m2-m1-fa;            mqiuhe *= a;            double C = 0;            if(i!=0)                C = c / (m2 - m1 - fa)*s[i],C *= a;            temp[i] = s[i] - mqiuhe - C;        }        for (int i = 0; i &lt;= n; i++)            s[i] = temp[i];        last = now;        now = J(s, x, y, m1,m2, n, c);    }    return s;}double kfold(double **x, int *y, int n, int m, int k){    double avg = 0;    double d = m / k;    for (int j = 0; j &lt; k; j++)    {        for (int i = 0; i &lt; m; i++)            flag[i] = true;        for (int i = d * j; i &lt; d*j + d; i++)//测试集            flag[i] = false;        double *s = logistic(x, y, n, 0, m, 0.1, 0.01);//学习率0.1，正则化权重0.01        int tr = 0;        for (int i = d * j; i &lt; d*j + d; i++)        {            double res = s[0];            for (int j = 1; j &lt;= n; j++)                res += s[j] * x[i][j - 1];            double h = (double)1 / (1 + exp(-res));            if (h &gt;= 0.5&amp;&amp;y[i] == 1)                tr++;            else if (h &lt; 0.5&amp;&amp;y[i] == 0)                tr++;            //cout &lt;&lt; h &lt;&lt; endl;        }        //cout &lt;&lt; tr &lt;&lt; endl;        double acc = tr / (double)d;        avg += acc;        cout &lt;&lt; &quot;第&quot; &lt;&lt; j +1 &lt;&lt; &quot;次acc值为：&quot; &lt;&lt; acc &lt;&lt; endl;    }    return avg / k;}int main() {    ifstream f;    f.open(&quot;breast-w.csv&quot;);    if (!f.is_open())    {        cout &lt;&lt; &quot;open error&quot; &lt;&lt; endl;        return 0;    }    string line;    int m = 0;    int n = 0;    double **x = new double*[10000];    int *y = new int[10000];    while (getline(f,line))       {            int n1 = 0;        x[m] = new double[1000];        istringstream sin(line);         string temp;        while (getline(sin, temp, &#39;,&#39;))         {            x[m][n1] = atof(temp.c_str());            //cout &lt;&lt; x[m][n1] &lt;&lt; endl;            n1++;        }        y[m] = x[m][n1 - 1]==-1?0:1;        m++;        n = n1-1;    }    double acc = kfold(x, y, n, m, 5);    cout &lt;&lt; &quot;平均：&quot; &lt;&lt; acc &lt;&lt; endl;}</code></pre>]]></content>
+      
+      
+      <categories>
+          
+          <category> 机器学习 </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> 手撸 </tag>
+            
+            <tag> 机器学习 </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>【天梯赛】第四届团体程序设计天梯赛L2题解</title>
+      <link href="/post/c332d4b5.html"/>
+      <url>/post/c332d4b5.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p><img src="/img/4.jpg" alt="封面"></p><h1 id="L2-1-特立独行的幸福-（25分"><a href="#L2-1-特立独行的幸福-（25分" class="headerlink" title="L2-1 特立独行的幸福 （25分)"></a>L2-1 特立独行的幸福 （25分)</h1><p>对一个十进制数的各位数字做一次平方和，称作一次迭代。如果一个十进制数能通过若干次迭代得到 1，就称该数为幸福数。1 是一个幸福数。此外，例如 19 经过 1 次迭代得到 82，2 次迭代后得到 68，3 次迭代后得到 100，最后得到 1。则 19 就是幸福数。显然，在一个幸福数迭代到 1 的过程中经过的数字都是幸福数，它们的幸福是依附于初始数字的。例如 82、68、100 的幸福是依附于 19 的。而一个特立独行的幸福数，是在一个有限的区间内不依附于任何其它数字的；其独立性就是依附于它的的幸福数的个数。如果这个数还是个素数，则其独立性加倍。例如 19 在区间[1, 100] 内就是一个特立独行的幸福数，其独立性为 2×4=8。</p><p>另一方面，如果一个大于1的数字经过数次迭代后进入了死循环，那这个数就不幸福。例如 29 迭代得到 85、89、145、42、20、4、16、37、58、89、…… 可见 89 到 58 形成了死循环，所以 29 就不幸福。</p><p>本题就要求你编写程序，列出给定区间内的所有特立独行的幸福数和它的独立性。</p><h2 id="输入格式："><a href="#输入格式：" class="headerlink" title="输入格式："></a>输入格式：</h2><p>输入在第一行给出闭区间的两个端点：1&lt;A&lt;B≤10^4</p><h2 id="输出格式："><a href="#输出格式：" class="headerlink" title="输出格式："></a>输出格式：</h2><p>按递增顺序列出给定闭区间 [A,B] 内的所有特立独行的幸福数和它的独立性。每对数字占一行，数字间以 1 个空格分隔。</p><p>如果区间内没有幸福数，则在一行中输出 SAD。</p><h2 id="输入样例-1："><a href="#输入样例-1：" class="headerlink" title="输入样例 1："></a>输入样例 1：</h2><pre><code>10 40</code></pre><h2 id="输出样例-1："><a href="#输出样例-1：" class="headerlink" title="输出样例 1："></a>输出样例 1：</h2><pre><code>19 823 628 331 432 3</code></pre><p>注意：样例中，10、13 也都是幸福数，但它们分别依附于其他数字（如 23、31 等等），所以不输出。其它数字虽然其实也依附于其它幸福数，但因为那些数字不在给定区间 [10, 40] 内，所以它们在给定区间内是特立独行的幸福数。</p><h2 id="输入样例-2："><a href="#输入样例-2：" class="headerlink" title="输入样例 2："></a>输入样例 2：</h2><pre><code>110 120</code></pre><h2 id="输出样例-2："><a href="#输出样例-2：" class="headerlink" title="输出样例 2："></a>输出样例 2：</h2><pre><code>SAD</code></pre><p>思路：从A开始遍历，到B结束，如果当前数是幸福数，加入结果集合total，并保存当前数和其独立性，此后每次遍历其他数的时候，如果过程中得到了结果集合里的数，说明之前的数依赖当前的数，则删掉之前的数。每次遍历的时候再用一个集合判断是否循环。遍历结束时，把之前曾经是幸福数的每个数都遍历一下，出现在结果集合里的则是最终答案。</p><pre><code>#include &lt;iostream&gt;#include&lt;vector&gt;#include&lt;queue&gt;#include&lt;algorithm&gt;#include &lt;string&gt;#include &lt;vector&gt;#include&lt;stack&gt;#include&lt;cmath&gt;#include&lt;set&gt;#include&lt;string.h&gt;using namespace std;int su(int n){    int j = sqrt(n);    for (int i = 2; i &lt;= j; i++)        if (n%i == 0)            return 1;    return 2;}int ping(int n){    int res = 0;    for (int i = 0;; i++)    {        res += (n % 10)*(n % 10);        n /= 10;        if (n == 0)            break;    }    return res;}int main() {    int x, y;    cin &gt;&gt; x &gt;&gt; y;    int res[10001];    int w[10001];    int geshu = 0;    set&lt;int&gt; total;    bool yilai[10001];    memset(yilai, false, sizeof(yilai));    for (int i = x; i &lt;= y; i++)    {        if (yilai[i])            continue;        int temp = i;        set&lt;int&gt; bianhuan;        bool yes = false;        if (i == 1)            yes = true;        while (temp != 1)        {            bianhuan.insert(temp);            temp = ping(temp);            if (bianhuan.count(temp) == 1)                break;            if (temp == 1)            {                yes = true;                break;            }            yilai[temp] = true;            if (total.count(temp) == 1)                total.erase(temp);        }        if (yes)        {            res[geshu] = i;            w[geshu] = su(i)*bianhuan.size();            total.insert(i);            geshu++;        }    }    if (geshu == 0)        cout &lt;&lt; &quot;SAD&quot;;    else    {        for(int i=0;i&lt;geshu;i++)            if (total.count(res[i]) == 1)            {                cout &lt;&lt; res[i] &lt;&lt; &quot; &quot; &lt;&lt; w[i] &lt;&lt; endl;            }    }}</code></pre><hr><h1 id="L2-2-冰岛人"><a href="#L2-2-冰岛人" class="headerlink" title="L2-2 冰岛人"></a>L2-2 冰岛人</h1><p>本人到现在还不知道到底该怎么做，改来改去也只有20分，等以后想到了解决方法再来更新。</p><hr><h1 id="L2-3-深入虎穴-（25分"><a href="#L2-3-深入虎穴-（25分" class="headerlink" title="L2-3 深入虎穴 （25分)"></a>L2-3 深入虎穴 （25分)</h1><p>著名的王牌间谍 007 需要执行一次任务，获取敌方的机密情报。已知情报藏在一个地下迷宫里，迷宫只有一个入口，里面有很多条通路，每条路通向一扇门。每一扇门背后或者是一个房间，或者又有很多条路，同样是每条路通向一扇门…… 他的手里有一张表格，是其他间谍帮他收集到的情报，他们记下了每扇门的编号，以及这扇门背后的每一条通路所到达的门的编号。007 发现不存在两条路通向同一扇门。</p><p>内线告诉他，情报就藏在迷宫的最深处。但是这个迷宫太大了，他需要你的帮助 —— 请编程帮他找出距离入口最远的那扇门。</p><h2 id="输入格式：-1"><a href="#输入格式：-1" class="headerlink" title="输入格式："></a>输入格式：</h2><p>输入首先在一行中给出正整数 N（&lt;10^5），是门的数量。最后 N 行，第 i 行（1≤i≤N）按以下格式描述编号为 i 的那扇门背后能通向的门：<br><code>K D[1] D[2] ... D[K]</code><br>其中<code>K</code>是通道的数量，其后是每扇门的编号。</p><h2 id="输出格式：-1"><a href="#输出格式：-1" class="headerlink" title="输出格式："></a>输出格式：</h2><p>在一行中输出距离入口最远的那扇门的编号。题目保证这样的结果是唯一的。</p><h2 id="输入样例："><a href="#输入样例：" class="headerlink" title="输入样例："></a>输入样例：</h2><pre><code>133 2 3 42 5 61 71 81 902 11 101 13001 1200</code></pre><h2 id="输出样例："><a href="#输出样例：" class="headerlink" title="输出样例："></a>输出样例：</h2><pre><code>12</code></pre><p>思路：比赛的时候这道题我用了三种方法写，bfs，迪杰斯特拉，dfs，但最后最高也只得了18分，最后才知道，并不是默认1号门为入口，要找出入度为0的门作为入口，坑啊。之后直接dfs就行了，挺简单的。</p><pre><code>#include &lt;iostream&gt;#include&lt;vector&gt;#include&lt;queue&gt;#include&lt;algorithm&gt;#include&lt;string&gt;#include&lt;vector&gt;#include&lt;stack&gt;#include&lt;cmath&gt;#include&lt;set&gt;#include&lt;string.h&gt;using namespace std;vector&lt;int&gt; v[100001];int maxx = 0;int bian = 0;void dfs(int i, int ju){    if (ju &gt; maxx)        maxx = ju, bian = i;    for (int j = 0; j &lt; v[i].size(); j++)        dfs(v[i][j], ju + 1);}int du[100001];int main() {    memset(du, 0, sizeof(du));    int n;    cin &gt;&gt; n;    for (int i = 1; i &lt;= n; i++)    {        int k, t;        cin &gt;&gt; k;        for (int j = 0; j &lt; k; j++)        {            cin &gt;&gt; t;            v[i].push_back(t);            du[t]++;        }    }    int start = 0;    for(int i=1;i&lt;=n;i++)        if (du[i] == 0)        {            start = i;            break;        }    dfs(start, 1);    cout &lt;&lt; bian;}</code></pre><hr><h1 id="L2-4-彩虹瓶-（25分"><a href="#L2-4-彩虹瓶-（25分" class="headerlink" title="L2-4 彩虹瓶 （25分)"></a>L2-4 彩虹瓶 （25分)</h1><p>彩虹瓶的制作过程（并不）是这样的：先把一大批空瓶铺放在装填场地上，然后按照一定的顺序将每种颜色的小球均匀撒到这批瓶子里。</p><p>假设彩虹瓶里要按顺序装 N 种颜色的小球（不妨将顺序就编号为 1 到 N）。现在工厂里有每种颜色的小球各一箱，工人需要一箱一箱地将小球从工厂里搬到装填场地。如果搬来的这箱小球正好是可以装填的颜色，就直接拆箱装填；如果不是，就把箱子先码放在一个临时货架上，码放的方法就是一箱一箱堆上去。当一种颜色装填完以后，先看看货架顶端的一箱是不是下一个要装填的颜色，如果是就取下来装填，否则去工厂里再搬一箱过来。</p><p>如果工厂里发货的顺序比较好，工人就可以顺利地完成装填。例如要按顺序装填 7 种颜色，工厂按照 7、6、1、3、2、5、4 这个顺序发货，则工人先拿到 7、6 两种不能装填的颜色，将其按照 7 在下、6 在上的顺序堆在货架上；拿到 1 时可以直接装填；拿到 3 时又得临时码放在 6 号颜色箱上；拿到 2 时可以直接装填；随后从货架顶取下 3 进行装填；然后拿到 5，临时码放到 6 上面；最后取了 4 号颜色直接装填；剩下的工作就是顺序从货架上取下 5、6、7 依次装填。</p><p>但如果工厂按照 3、1、5、4、2、6、7 这个顺序发货，工人就必须要愤怒地折腾货架了，因为装填完 2 号颜色以后，不把货架上的多个箱子搬下来就拿不到 3 号箱，就不可能顺利完成任务。</p><p>另外，货架的容量有限，如果要堆积的货物超过容量，工人也没办法顺利完成任务。例如工厂按照 7、6、5、4、3、2、1 这个顺序发货，如果货架够高，能码放 6 只箱子，那还是可以顺利完工的；但如果货架只能码放 5 只箱子，工人就又要愤怒了……</p><p>本题就请你判断一下，工厂的发货顺序能否让工人顺利完成任务。</p><h2 id="输入格式：-2"><a href="#输入格式：-2" class="headerlink" title="输入格式："></a>输入格式：</h2><p>输入首先在第一行给出 3 个正整数，分别是彩虹瓶的颜色数量 N（1&lt;N≤10^3）、临时货架的容量 M（&lt;N）、以及需要判断的发货顺序的数量 K。</p><p>随后 K 行，每行给出 N 个数字，是 1 到N 的一个排列，对应工厂的发货顺序。</p><p>一行中的数字都以空格分隔。</p><h2 id="输出格式：-2"><a href="#输出格式：-2" class="headerlink" title="输出格式："></a>输出格式：</h2><p>对每个发货顺序，如果工人可以愉快完工，就在一行中输出 YES；否则输出 NO。</p><h2 id="输入样例：-1"><a href="#输入样例：-1" class="headerlink" title="输入样例："></a>输入样例：</h2><pre><code>7 5 37 6 1 3 2 5 43 1 5 4 2 6 77 6 5 4 3 2 1</code></pre><h2 id="输出样例：-1"><a href="#输出样例：-1" class="headerlink" title="输出样例："></a>输出样例：</h2><pre><code>YESNONO</code></pre><p>思路：没啥好说的，直接读数，用一个stack模拟一下就行了。</p><pre><code>#include &lt;iostream&gt;#include&lt;vector&gt;#include&lt;queue&gt;#include&lt;algorithm&gt;#include &lt;string&gt;#include &lt;vector&gt;#include&lt;stack&gt;#include&lt;cmath&gt;#include&lt;set&gt;#include&lt;string.h&gt;using namespace std;int main() {    int n, m, k;    cin &gt;&gt; n &gt;&gt; m &gt;&gt; k;    for (int i = 0; i &lt; k; i++)    {        int a[1001];        for (int j = 0; j &lt; n; j++)            cin &gt;&gt; a[j];        stack&lt;int&gt; s;        int now = 1;        for (int j = 0; j &lt; n; j++)        {            if (a[j] == now)            {                now++;                if (s.empty())                    continue;                while (!s.empty())                {                    if (s.top() == now)                    {                        now++;                        s.pop();                    }                    else                        break;                }            }            else            {                s.push(a[j]);                if (s.size() &gt; m)                    break;            }        }        if (now == n + 1)            cout &lt;&lt; &quot;YES&quot; &lt;&lt; endl;        else            cout &lt;&lt; &quot;NO&quot; &lt;&lt; endl;    }}</code></pre>]]></content>
+      
+      
+      <categories>
+          
+          <category> oj </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> 比赛 </tag>
+            
+            <tag> oj </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>【Unity】自制unity3D弹幕游戏</title>
+      <link href="/post/2cf7b827.html"/>
+      <url>/post/2cf7b827.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p><img src="/img/3.jpg" alt="封面"><br>学校的Unity3D企业实习的作品，用了三天时间制作</p><h1 id="WSAD上下左右"><a href="#WSAD上下左右" class="headerlink" title="WSAD上下左右"></a>WSAD上下左右</h1><h1 id="J发射子弹，K大招（只能抵消敌方子弹而不会对地方造成伤害）"><a href="#J发射子弹，K大招（只能抵消敌方子弹而不会对地方造成伤害）" class="headerlink" title="J发射子弹，K大招（只能抵消敌方子弹而不会对地方造成伤害）"></a>J发射子弹，K大招（只能抵消敌方子弹而不会对地方造成伤害）</h1><h1 id="发射子弹过程中按L，可变集中火力形态，同时移动速度变慢，便于躲避子弹"><a href="#发射子弹过程中按L，可变集中火力形态，同时移动速度变慢，便于躲避子弹" class="headerlink" title="发射子弹过程中按L，可变集中火力形态，同时移动速度变慢，便于躲避子弹"></a>发射子弹过程中按L，可变集中火力形态，同时移动速度变慢，便于躲避子弹</h1><p>由于没有设置大招条件，所以可以无限发射大招，比较耍赖，所以为了证明自己的技术，最好不要用大招哦<br>玩家有20滴血，小怪有20滴血，BOSS有900滴血<br>打死小怪加10分，打死BOSS加45分，总分超过1500才能被称为大佬<br><img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"> <img src="/img/hj.png" alt="封面"></p><p><center>滑稽分界线</center><br><a href="https://yoyo-nb.github.io/DanmuGame/" title="DanmuGame" target="_blank" rel="noopener">点这里试玩点这里试玩点这里试玩</a>. </p><p>本垃圾试玩视频（在博客里只能360P垃圾画质，选择1080P画质会直接跳进bilibili观看）</p><iframe width="800" height="450" src="//player.bilibili.com/player.html?aid=45565323&cid=79783064&page=1" frameborder="0" allowfullscreen></iframe>]]></content>
+      
+      
+      <categories>
+          
+          <category> 搞事 </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> Unity3D </tag>
+            
+            <tag> 游戏 </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>【算导】建堆过程时间复杂度分析</title>
+      <link href="/post/d469f3ff.html"/>
+      <url>/post/d469f3ff.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p>以下堆假设都是最大堆。<br>维护堆的性质的函数：将当前点与左右孩子比较，若孩子更大，将较大的孩子与当前节点交换位置，当前节点被换到的子节点继续用此方法，直到叶节点或不需要交换。<br>若共有n个元素，则每次调用该方法的时间复杂度为O(lgn)。建堆过程需要自底向上将所有元素都调用一遍该方法，看起来时间复杂度应为O(nlgn),但这个上界虽然正确，却不是渐进紧确的，有很大一部分的节点高度并没有达到lgn。</p><p>设n个元素，高度为lgn，堆中高度为h的元素最多有n/2^(h+1)个（h从0开始计数），高度为h的节点调用上述方法的时间复杂度为O（h），则总时间代价为：</p><script type="math/tex; mode=display">\sum_{h=0}^{\left \lfloor lgn \right \rfloor}\left \lceil \frac{n}{2^{h+1}} \right \rceil O(h) = O(n\sum_{h=0}^{\left \lfloor lgn \right \rfloor}\frac{h}{2^{h}})</script><p>等式右边由于在O（）内部，所以常数对结果没有影响，所以分母中2的幂数可以改变，变为2^h。根据级数：当|x|&lt;1时:</p><script type="math/tex; mode=display">\sum_{k=0}^{\infty }x^{k} = \frac{1}{1-x}</script><p>两边同时微分，并乘以x，得：</p><script type="math/tex; mode=display">\sum_{k=0}^{\infty }kx^{k} = \frac{x}{(1-x)^{2}}</script><p>将x等于1/2带入，结果为2。<br>则建堆过程的时间复杂度为</p><script type="math/tex; mode=display">O(n\sum_{h=0}^{\left \lfloor lgn \right \rfloor}\frac{h}{2^{h}}) = O(n\sum_{h=0}^{\infty }\frac{h}{2^{h}}) = O(2n) = O(n)</script><p>因此可以在线性时间内把一个无序数组构造成一个最大堆。</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> 算法导论 </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> 算导 </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>【算导】生日悖论</title>
+      <link href="/post/81339208.html"/>
+      <url>/post/81339208.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p>算导P73</p><h1 id="生日悖论"><a href="#生日悖论" class="headerlink" title="生日悖论"></a>生日悖论</h1><p>屋内有k个人，一年有n天，k达到多少时，两人生日相同的机会能达到50%？<br>至少两人生日相同概率等于1-都不相同概率<br>则k个人都不相同的事件：</p><script type="math/tex; mode=display">B_{k}=\bigcap_{i=1}^{k} A_{i}</script><p>其中，Ai为所有j&lt;i，i与j不同生日的事件。则：</p><script type="math/tex; mode=display">B_{k}=A_{k}\bigcap B_{k-1}</script><p>则有递归式：</p><script type="math/tex; mode=display">P(B_{k})=P(B_{k-1})P(A_{k}|B_{k-1})</script><p>即：假设1到k-1编号的人两两不相同，则1到k的人两两不相同的概率等于1到k-1两两不相同的概率乘以k号与前面所有人不相同的概率，取P(B1)=P(A1)=1<br>则可求P(Bk):<br>过程略（太麻烦了）<br>结果为：-k(k-1)/2n≤ln(1/2)时成立，解得当n=365时，k至少为23。</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> 算法导论 </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> 算导 </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>【算导】分治法求解最大子数组</title>
+      <link href="/post/35693.html"/>
+      <url>/post/35693.html</url>
+      
+        <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><p>任意子数组必然是以下三种情况之一：</p><p>1.完全在a[low…mid]中。</p><p>2.完全在a[mid+1…high]中。</p><p>3.跨越了数组中点。</p><p>若结果为1或2，则可通过递归求解，若结果为3，则可通过一个线性时间复杂度的函数求解：</p><pre><code>FIND-CROSS(a,low,mid,high)    leftsum=0;    sum=0;    for(int i=mid;i&gt;=low;i--)    {        sum+=a[i];        leftsum=max(leftsum,sum);    }    rightsum=0;    sum=0;    for(int i=mid;i&lt;high;i++)    {        sum+=a[i];        rightsum=max(rightsum,sum);    }return leftsum+rightsum</code></pre><p>最后写一个总函数：</p><pre><code>FIND(a,low,high)    if(low==high)        return a[low]    else    {        mid=(low+high)/2        b=FIND(a,low,mid)        c=FIND(a,mid+1,high)        d=FIND-CROSS(a,low,mid,high)        return max(b,c,d);    }</code></pre><p>时间复杂度O(nlogn)</p><p>一个更优化的方法，时间复杂度O(n)<br>从头遍历，每遍历一个数，加到sum中，与当前最大值res比较更新res，当sum小于0时，sum、<br>等于0，相当于把之前的所有结果清零，从下一个数重新比较并继续更新res</p><pre><code>int maxSubArray(vector&lt;int&gt; nums) {    int ge = nums.size();    if (ge == 0)        return 0;    int sum = 0;    int res = nums[0];    for (int i = 0; i &lt; ge; i++)    {        sum += nums[i];        res = max(sum, res);        if (sum &lt; 0)            sum = 0;            }    return res;}</code></pre>]]></content>
+      
+      
+      <categories>
+          
+          <category> 做题笔记 </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> 算导 </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+  
+  
+</search>
