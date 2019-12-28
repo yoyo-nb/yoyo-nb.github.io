@@ -1,8 +1,8 @@
 {
 "companyName": "DefaultCompany",
 "productName": "danmu",
-"dataUrl": "http://lc-faWhCflf.cn-n1.lcfile.com/0b942d64d9f211837841/nb.data.unityweb",
-"wasmCodeUrl": "http://lc-faWhCflf.cn-n1.lcfile.com/b25b1fe7385f5fdb1436/nb.wasm.code.unityweb",
+"dataUrl": "https://lc-faWhCflf.cn-n1.lcfile.com/0b942d64d9f211837841/nb.data.unityweb",
+"wasmCodeUrl": "https://lc-faWhCflf.cn-n1.lcfile.com/b25b1fe7385f5fdb1436/nb.wasm.code.unityweb",
 "wasmFrameworkUrl": "nb.wasm.framework.unityweb",
 "TOTAL_MEMORY": 268435456,
 "graphicsAPI": ["WebGL 2.0", "WebGL 1.0"],
