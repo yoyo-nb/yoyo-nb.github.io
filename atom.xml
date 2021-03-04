@@ -6,7 +6,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="http://yoursite.com/"/>
-  <updated>2020-04-02T14:37:25.766Z</updated>
+  <updated>2021-03-04T16:19:44.569Z</updated>
   <id>http://yoursite.com/</id>
   
   <author>
@@ -15,6 +15,31 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>【算法笔记】目标检测之RCNN</title>
+    <link href="http://yoursite.com/post/664697e9.html"/>
+    <id>http://yoursite.com/post/664697e9.html</id>
+    <published>2021-03-04T15:58:24.000Z</published>
+    <updated>2021-03-04T16:19:44.569Z</updated>
+    
+    <content type="html"><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><h1 id="算法流程"><a href="#算法流程" class="headerlink" title="算法流程"></a>算法流程</h1><p><img src="/images/ee586c0405805558105a95efc3fdadd586744ba99895b06eb6a2de9d88db458d.png" alt="picture 2">  </p><p>1、输入测试图片<br>2、利用<strong>selective search</strong>算法从图像中提取2k左右个region proposals（备选区域）<br>3、将每一个region proposals缩放成227x227的大小并输入CNN网络，在最后一层全连接输出图像特征（特征提取）<br>4、把每个region proposal的CNN特征输入到SVM进行分类处理<br>5、对SVM分类好的region proposal进行边框回归处理，使得预测框和真实框更加吻合（边框回归）</p><hr><h1 id="Selective-Search"><a href="#Selective-Search" class="headerlink" title="Selective Search"></a>Selective Search</h1><pre><code>--------------------------------利用切分方法得到候选的区域集合R = {r1,r2,…,rn}初始化相似集合S = ϕforeach 遍历邻居区域对(ri,rj) do    计算相似度s(ri,rj)    S = S  ∪ s(ri,rj)while S not=ϕ do    从S中得到最大的相似度s(ri,rj)=max(S)    合并对应的区域rt = ri ∪ rj    移除ri对应的所有相似度：S = S\s(ri,r*)    移除rj对应的所有相似度：S = S\s(r*,rj)    计算rt对应的相似度集合St    S = S ∪ St    R = R ∪ rt</code></pre><p>其中第一步生成候选区域R所需算法：<br>基于图的图像分割（Graph-Based Image Segmentation）<br><a href="https://blog.csdn.net/guoyunfei20/article/details/78727972" target="_blank" rel="noopener">https://blog.csdn.net/guoyunfei20/article/details/78727972</a></p><h2 id="评价相似度"><a href="#评价相似度" class="headerlink" title="评价相似度"></a>评价相似度</h2><p>两块区域为$r_i,r_j$</p><p><strong>1、颜色相似度</strong><br>使用L1-norm归一化获取图像每个颜色通道的25 bins的直方图，这样每个区域都可以得到一个75维的向量$\{c_i^1,\dots, c_i^n \}$，区域之间颜色相似度通过下面的公式计算：</p><script type="math/tex; mode=display">s_{\text {colour }}\left(r_{i}, r_{j}\right)=\sum_{k=1}^{n} \min \left(c_{i}^{k}, c_{j}^{k}\right)</script><p>每一个颜色通道的直方图累加和为1.0，三个通道的累加和就为3.0，如果区域ci和区域cj直方图完全一样，则此时颜色相似度最大为3.0，如果不一样，由于累加取两个区域bin的最小值进行累加，当直方图差距越大，累加的和就会越小，即颜色相似度越小。<br>合并后新相似度为：</p><script type="math/tex; mode=display">C_{t}=\frac{\operatorname{size}\left(r_{i}\right) \times C_{i}+\operatorname{size}\left(r_{j}\right) \times C_{j}}{\operatorname{size}\left(r_{i}\right)+\operatorname{size}\left(\mathrm{r}_{\mathrm{j}}\right)}</script><p><strong>2、纹理相似度</strong><br>每个颜色通道的8个不同方向计算方差σ=1的高斯微分（Gaussian Derivative），使用L1-norm归一化获取图像每个颜色通道的每个方向的10 bins的直方图，这样就可以获取到一个240（10x8x3）维的向量$T_i=\{t_i^1\dots t_i^n\}$，区域之间纹理相似度计算方式和颜色相似度计算方式类似，合并之后新区域的纹理特征计算方式和颜色特征计算相同：</p><script type="math/tex; mode=display">s_{\text {texture }}\left(r_{i}, r_{j}\right)=\sum_{k=1}^{n} \min \left(t_{i}^{k}, t_{j}^{k}\right)</script><p><strong>3、优先合并小的区域（小的区域权重更大）</strong><br>否则，容易使得合并后的区域不断吞并周围的区域。</p><script type="math/tex; mode=display">s_{\text {size }}\left(r_{i}, r_{j}\right)=1-\frac{\operatorname{size}\left(r_{i}\right)+\operatorname{size}\left(\mathrm{r}_{\mathrm{j}}\right)}{\operatorname{size}(image)}</script><p><strong>4、区域的合适度距离</strong><br>这里定义区域的合适度距离主要是为了衡量两个区域是否更加“吻合”，其指标是合并后的区域的Bounding Box（能够框住区域的最小矩形BBij）越小，其吻合度越高，即相似度越接近1。</p><script type="math/tex; mode=display">S_{fill}\left(r_{i}, r_{j}\right)=1-\frac{\operatorname{size}\left(B B_{i j}\right)-\operatorname{size}\left(r_{i}\right)-\operatorname{size}\left(r_{i}\right)}{\operatorname{size}(i m)}</script><p><strong>合并</strong></p><script type="math/tex; mode=display">\begin{aligned}s\left(r_{i}, r_{j}\right)=& a_{1} s_{\text {colour }}\left(r_{i}, r_{j}\right)+a_{2} s_{\text {texture }}\left(r_{i}, r_{j}\right)+\\& a_{3} s_{\text {size }}\left(r_{i}, r_{j}\right)+a_{4} s_{\text {fill }}\left(r_{i}, r_{j}\right) \\\text { 其中 } a_{i} \in\{0,1\} &\end{aligned}</script><hr><h1 id="CNN结构与类别预测"><a href="#CNN结构与类别预测" class="headerlink" title="CNN结构与类别预测"></a>CNN结构与类别预测</h1><p><strong>Alexnet</strong></p><p><img src="/images/7dd93086f3d68bfa85b8c11ee0003f83d48c8aa0c100f2701a79913d77ba4298.png" alt="picture 3">  </p><ul><li>因为R-CNN的网络结构中存在有全连接层（fc）,需要输入图像的尺寸保持一致，所以必须resize成227*227。</li><li>一个region proposal经过CNN网络输出4096维的特征</li><li>对每一类使用SVM进行二分类，判断是否属于此类。</li></ul><hr><h1 id="边框回归"><a href="#边框回归" class="headerlink" title="边框回归"></a>边框回归</h1><p>虽然已经使用了selective search来最大限度地提取目标的候选框，但有些候选框与真实框依旧有很大差距，因此使用一个线性方程来实现位置的精确定位。<br><img src="/images/7d6b66459999be00434deece4ae1dadb880b046dd541e31d22652f74658a3a2e.png" alt="picture 4"><br>如上图，黄色框口P表示建议框Region Proposal，绿色窗口G表示实际框Ground Truth，红色窗口表示Region Proposal进行回归后的预测窗口，现在的目标是找到P到$\hat{G}$的线性变换，使得与G越相近。<br>若$G=\left(G_{x}, G_{y}, G_{w}, G_{h}\right)$,四个元素的位移为：$d_{x}(P), d_{y}(P), d_{w}(P), d_{h}(P)$,则建立方程组：</p><script type="math/tex; mode=display">\begin{array}{l}\hat{G}_{x}=P_{w} d_{x}(P)+P_{x} \\\hat{G}_{y}=P_{h} d_{y}(P)+P_{y} \\\hat{G}_{w}=P_{w} \exp \left(d_{w}(P)\right) \\\hat{G}_{h}=P_{h} \exp \left(d_{h}(P)\right)\end{array}</script><p>每一个 $d_<em>(P)$都是一个AlexNet CNN网络Pool5层特征$\phi _5(P)$的线性函数$d_{</em>}(P)=w_{*}^{T} \phi_{5}(P)$，其中$w$为需要学习的参数。则损失函数为：</p><script type="math/tex; mode=display">\text { Loss }=\operatorname{argmin} \sum_{i=0}^{N}\left(t_{*}^{i}-\hat{w}_{*}^{T} \phi_{5}\left(P^{i}\right)\right)^{2}+\lambda\left\|\hat{w}_{*}\right\|^{2}</script><p>其中：</p><script type="math/tex; mode=display">\begin{aligned}t_{y} &=\left(G_{y}-P_{y}\right) / P_{h} \\t_{w} &=\log \left(G_{w} / P_{w}\right) \\t_{h} &=\log \left(G_{h} / P_{h}\right)\end{aligned}</script><hr><h1 id="NMS-非极大抑制"><a href="#NMS-非极大抑制" class="headerlink" title="NMS(非极大抑制)"></a>NMS(非极大抑制)</h1><p>假设有6个矩形框，根据分类器的类别分类概率做排序，假设从小到大的概率 分别为A、B、C、D、E、F。</p><p>(1)从最大概率矩形框F开始，分别判断A~E与F的重叠度IOU是否大于某个设定的阈值;</p><p>(2)假设B、D与F的重叠度超过阈值，那么就扔掉B、D；并标记第一个矩形框F，是我们保留下来的。</p><p>(3)从剩下的矩形框A、C、E中，选择概率最大的E，然后判断E与A、C的重叠度，重叠度大于一定的阈值，那么就扔掉；并标记E是我们保留下来的第二个矩形框。</p><p>就这样一直重复，找到所有被保留下来的矩形框。</p><p>代码：</p><pre><code class="lang-python">def NMS(dects,threshhold):    &quot;&quot;&quot;    detcs:二维数组(n_samples,5)    5列：x1,y1,x2,y2,score    threshhold: IOU阈值    &quot;&quot;&quot;    x1=dects[:,0]    y1=dects[:,1]    x2=dects[:,2]    y2=dects[:,3]    score=dects[:,4]    ndects=dects.shape[0]#box的数量    area=(x2-x1+1)*(y2-y1+1)    order=score.argsort()[::-1] #score从大到小排列的indexs,一维数组    keep=[] #保存符合条件的index    suppressed=np.array([0]*ndects) #初始化为0，若大于threshhold,变为1，表示被抑制    for _i in range(ndects):        i=order[_i]  #从得分最高的开始遍历        if suppressed[i]==1:            continue        keep.append(i)         for _j in range(i+1,ndects):            j=order[_j]            if suppressed[j]==1: #若已经被抑制，跳过                continue            xx1=np.max(x1[i],x1[j])#求两个box的交集面积interface            yy1=np.max(y1[i],y1j])            xx2=np.min(x2[i],x2[j])            yy2=np.min(y2[i],y2[j])            w=np.max(0,xx2-xx1+1)            h=np.max(0,yy2-yy1+1)            interface=w*h            overlap=interface/(area[i]+area[j]-interface) #计算IOU（交/并）            if overlap&gt;=threshhold:#IOU若大于阈值，则抑制                suppressed[j]=1    return keep</code></pre>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;link rel=&quot;stylesheet&quot; class=&quot;aplayer-secondary-style-marker&quot; href=&quot;\assets\css\APlayer.min.css&quot;&gt;&lt;script src=&quot;\assets\js\APlayer.min.js&quot; cla
+      
+    
+    </summary>
+    
+      <category term="算法笔记" scheme="http://yoursite.com/categories/%E7%AE%97%E6%B3%95%E7%AC%94%E8%AE%B0/"/>
+    
+    
+      <category term="目标检测" scheme="http://yoursite.com/tags/%E7%9B%AE%E6%A0%87%E6%A3%80%E6%B5%8B/"/>
+    
+  </entry>
   
   <entry>
     <title>【杂谈】2020届北航计算机，清华软件保研经验</title>
