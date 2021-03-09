@@ -26,6 +26,7 @@
 <h2 id="损失函数"><a href="#损失函数" class="headerlink" title="损失函数"></a>损失函数</h2><p><img src="/images/764b6b5c72f098d84142127ca2cb0d3ff9758e1568ea4b0d3236c52b8cce6e86.png" alt="picture 8">  </p>
 <p>最上部分为坐标误差，中间部分为IOU误差，最后部分为分类误差</p>
 <p>其中w与h需要先开根号再使用均方误差，原因如下:<br>对不同大小的bbox预测中，相比于大bbox预测偏一点，小box预测偏一点更不能忍受。在下图中small bbox的横轴值较小，发生偏移时，反应到y轴上的loss（下图绿色）比big box(下图红色)要大。<br><img src="/images/5e6f1342a0383c8904deeca99f3cf68a0fde7299592ec518f5509026c1fc04f3.png" alt="picture 9">  </p>
+<hr>
 <h1 id="YOLO-v2"><a href="#YOLO-v2" class="headerlink" title="YOLO v2"></a>YOLO v2</h1><h2 id="网络结构-1"><a href="#网络结构-1" class="headerlink" title="网络结构"></a>网络结构</h2><p><img src="/images/ab0f956dee2cd91570330f981a0f1d555e4f3df25f9d3d9f015676b50729b7e9.png" alt="picture 12"> </p>
 <h2 id="一系列改进"><a href="#一系列改进" class="headerlink" title="一系列改进"></a>一系列改进</h2><h3 id="1、引入BN"><a href="#1、引入BN" class="headerlink" title="1、引入BN"></a>1、引入BN</h3><p>在每一个卷积层后添加batch normalization，极大的改善了收敛速度同时减少了对其它regularization方法的依赖（舍弃了dropout依然没有过拟合），使得mAP获得了2%的提升。</p>
 <h3 id="2、高分辨率预训练"><a href="#2、高分辨率预训练" class="headerlink" title="2、高分辨率预训练"></a>2、高分辨率预训练</h3><p>YOLOv1在训练时先使用224x224的图片输入来预训练自己的特征提取网络，再使用448x448的数据集进行finetune。这说明网络需要重新学习识别大尺度（448）的图片以及学习进行其上的目标检测工作。</p>
@@ -63,6 +64,7 @@ b_{h} &=p_{h} e^{t_{h}} \\
 <li>第五行为<strong>分类损失</strong>，均方误差与YOLO v1一样。</li>
 <li>其中第2行需要变为$(2-w_i<em>h_i)</em>(prior_k^r-b_{ijk}^r)$，第三行同理。原因与YOLO v1相同，大目标对wh约束不强，小目标更严格。而YOLO v1中的开根号方式作者认为没用。所以改用这样的形式。</li>
 </ul>
+<hr>
 <h1 id="YOLO-v3"><a href="#YOLO-v3" class="headerlink" title="YOLO v3"></a>YOLO v3</h1><h2 id="网络结构-2"><a href="#网络结构-2" class="headerlink" title="网络结构"></a>网络结构</h2><p><img src="/images/e4b858710199a4233518d9af0171daa965a3be843878cfba0c9f1eab985e0607.png" alt="picture 13">  </p>
 <p><img src="/images/e084250da679132aa454eccdc115e72d4ec1ed8be4fd7872177cab7d3c764b25.png" alt="picture 1">  </p>
 <p>此结构主要由75个卷基层构成，没有池化层和全连接层，张量的尺寸变换是通过改变卷积核的步长来实现的。<br>yolo_v2中对于前向过程中张量尺寸变换，都是通过 最大池化来进行，一共有5次。而v3是通过卷积核 增大步长来进行，也是5次。</p>
@@ -76,6 +78,7 @@ b_{h} &=p_{h} e^{t_{h}} \\
 <li>第三行第四行为bounding box 的conference的二元交叉熵误差，第三行为有物体情况，第四行为无物体情况。由于图片中大部分区域无物体，所以无物体情况乘衰减系数$\lambda_{noobj}$，比如0.5</li>
 <li>第五行为分类误差，使用二元交叉熵。</li>
 </ul>
+<hr>
 <h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><p><a href="https://zhuanlan.zhihu.com/p/46691043" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/46691043</a><br><a href="https://zhuanlan.zhihu.com/p/24916786" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/24916786</a><br><a href="https://zhuanlan.zhihu.com/p/25236464/" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/25236464/</a><br><a href="https://blog.csdn.net/c20081052/article/details/80236015" target="_blank" rel="noopener">https://blog.csdn.net/c20081052/article/details/80236015</a><br><a href="https://zhuanlan.zhihu.com/p/25167153" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/25167153</a><br><a href="https://blog.csdn.net/leviopku/article/details/82660381" target="_blank" rel="noopener">https://blog.csdn.net/leviopku/article/details/82660381</a><br><a href="https://zhuanlan.zhihu.com/p/40332004" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/40332004</a><br><a href="https://blog.csdn.net/just_sort/article/details/103232484" target="_blank" rel="noopener">https://blog.csdn.net/just_sort/article/details/103232484</a><br><a href="https://zhuanlan.zhihu.com/p/142408168" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/142408168</a></p>
 </div></article><div class="p-info box"><span class="p-tags"><i class="fa fa-tag"></i><a href="/tags/目标检测/">目标检测</a></span></div></div><section class="p-ext"><div class="l-pager l-pager-dtl box"><a class="next" href="/post/205a2488.html">【算法笔记】目标检测之Fastst RCNN与Faster RCNN &gt;</a></div><div id="valine-comment"><style type="text/css">.v * { color: #CECECE; }
 .v a { color: #0F9FB4; }
