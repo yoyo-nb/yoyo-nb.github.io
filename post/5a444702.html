@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en"><head><meta name="generator" content="Hexo 3.8.0"><meta http-equiv="content-type" content="text/html; charset=utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport"><meta content="yes" name="apple-mobile-web-app-capable"><meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"><meta content="telephone=no" name="format-detection"><meta name="description"><title>【算法笔记】语义分割之FCN与Mask-RCNN | YOYO</title><link rel="stylesheet" type="text/css" href="/css/style.css"><link rel="Shortcut Icon" type="image/x-icon" href="/favicon.png"><link rel="stylesheet" href="//cdn.bootcss.com/font-awesome/4.7.0/css/font-awesome.min.css"><script type="text/javascript" src="//cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script></head><link rel="stylesheet" type="text/css" href="/plugins/prettify/doxy.css"><script type="text/javascript" src="/js/ready.js" async></script><body><div class="mobile-head" id="mobile-head"><div class="navbar-icon"><span></span><span></span><span></span></div><div class="navbar-title"><a href="/">YOYO</a></div><div class="navbar-search"><!--= show a circle here--></div></div><div class="h-wrapper" id="menu"><nav class="h-head box"><div class="m-hdimg"><a class="hdimg img" href="/"><img class="nofancybox" src="/img/profile.jpg" width="128" height="128"></a><h1 class="ttl"><a href="/">YOYO</a></h1></div><p class="m-desc">一只小菜鸡,<br>希望自己更牛逼</p><div class="m-nav"><ul><li><span class="dot">●</span><a href="/archives/">归档</a></li><li><span class="dot">●</span><a href="/categories/">分类</a></li><li><span class="dot">●</span><a href="/tags/">标签</a></li><li><span class="dot">●</span><a href="/about/">关于</a></li><li class="m-sch"><form class="form" id="j-formsch" method="get"><input class="txt" type="text" id="local-search-input" name="q" value="搜索" onfocus="if(this.value=='搜索'){this.value='';}" onblur="if(this.value==''){this.value='搜索';}"><input type="text" style="display:none;"></form></li></ul><div id="local-search-result"></div></div></nav></div><div id="back2Top"><a class="fa fa-arrow-up" title="Back to top" href="#"></a></div><div class="box" id="container"><div class="l-wrapper"><div class="l-content box"><div class="l-post l-post-art"><article class="p-art"><div class="p-header box"><h1 class="p-title">【算法笔记】语义分割之FCN与Mask-RCNN</h1><div class="p-info"><span class="p-date"><i class="fa fa-calendar"></i><a href="/post/5a444702.html">2021-03-13</a></span><span class="p-category"><i class="fa fa-folder"></i><a href="/categories/算法笔记/">算法笔记</a></span><span class="p-view" id="busuanzi_container_page_pv"><i class="fa fa-eye"></i><span id="busuanzi_value_page_pv"></span></span></div></div><div class="p-content"><p><img src="/images/fdd78bec3cbe3d14766ff0dff06c9d05dca04e553a0f9d7cc444ac211ac6dbb5.png" alt="picture 1">  </p>
+<p>上图为计算机视觉的三大任务，目标检测，语义分割和实例分割。</p>
+<hr>
+<h1 id="FCN"><a href="#FCN" class="headerlink" title="FCN"></a>FCN</h1><p>FCN的目的是对图片进行语义分割，即对每一个像素进行分类，输出该像素是否是物体上的像素。</p>
+<h2 id="主要思想"><a href="#主要思想" class="headerlink" title="主要思想"></a>主要思想</h2><ul>
+<li>不含全连接层(fc)的全卷积(fully conv)网络。可适应任意尺寸输入。 </li>
+<li>增大数据尺寸的转置卷积层。能够输出精细的结果。 </li>
+<li>结合不同深度层结果的跳级(skip)结构。同时确保鲁棒性和精确性。</li>
+</ul>
+<p>FCN与CNN的区别在于FCN把CNN最后的全连接层换成卷积层，输出语义分割结果。</p>
+<h4 id="转置卷积"><a href="#转置卷积" class="headerlink" title="转置卷积"></a>转置卷积</h4><p>卷积层可表示为$Ax = b$，A为卷积的托普利兹矩阵。<br>$A^Tb = x$即为转置卷积。</p>
+<h2 id="跳跃结构"><a href="#跳跃结构" class="headerlink" title="跳跃结构"></a>跳跃结构</h2><p>网络中存在若干pooling层，将该层输出进行转置卷积上采样，与前一个pooling层的输出逐像素相加。如下图所示。<br><img src="/images/e01b7ad65c6f2858595d682cb822b15880e4bc12035976cddbf5112cabcf91a1.png" alt="picture 2">  </p>
+<p>将最后三个pooling层的输出按此方法拼接，最终的转置卷积步长为8，即8倍上采样才能让输出与输出图片尺寸相同。</p>
+<h2 id="网络结构"><a href="#网络结构" class="headerlink" title="网络结构"></a>网络结构</h2><p><img src="/images/b90833c5cd12158ae8d4fd6f627441ef18d097c54af901ee06aeb015ebc920bc.png" alt="picture 1">  </p>
+<ul>
+<li>蓝色：卷积层</li>
+<li>绿色：Max Pooling层</li>
+<li>黄色: 求和运算, 使用逐数据相加，较浅的结果更为精细，较深的结果更为鲁棒。</li>
+<li>灰色: 裁剪, 在融合之前，使用裁剪层统一两者大小, 最后裁剪成和输入相同尺寸输出</li>
+<li>橙色：转置卷积，最后一个橙色转置卷积步长为8。</li>
+<li>对于不同尺寸的输入图像，各层数据的尺寸（height，width）相应变化，深度（channel）不变</li>
+<li>最终的输出通道数为21，因为PASCAL数据集共20类，加上背景类为21。</li>
+</ul>
+<p>所以损失函数为输出的21通道对每个像素位置使用softmax得到分类结果。</p>
+<hr>
+<h1 id="Mask-RCNN"><a href="#Mask-RCNN" class="headerlink" title="Mask-RCNN"></a>Mask-RCNN</h1><h2 id="网络结构-1"><a href="#网络结构-1" class="headerlink" title="网络结构"></a>网络结构</h2><p>Mask R-CNN是一个非常灵活的框架，可以增加不同的分支完成不同的任务，可以完成目标分类、目标检测、语义分割、实例分割、人体姿势识别等多种任务。</p>
+<p>Mask-RCNN 大体框架还是 Faster-RCNN 的框架，在RPN后接Fast-RCNN来预测种类和bbox回归，就是Faster-RCNN。而RPN后接另一个分支即为Mask-RCNN。其中RPN的作用不变，都是proposal可能会出现物体的regions。</p>
+<p>Mask-RCNN部分为一个全卷积网络的分支，对每个RoI预测了逐像素的分割遮罩，以说明给定像素是否是目标的一部分。当像素属于目标的所有位置上时标识为1，其它位置标识为 0。示意图如下：<br><img src="/images/33160fc7566c39bbbeb9ce4b8a72e81fd3eba24188b78be66ff6eedf3d8e9e79.png" alt="picture 6">  </p>
+<p>与Faster-RCNN不同点：</p>
+<ul>
+<li>ROI Pooling改为ROI Align</li>
+<li>提取特征的网络由VGG改为Resnet</li>
+<li>添加并列的FCN（Mask部分）</li>
+</ul>
+<h2 id="ROIAlign"><a href="#ROIAlign" class="headerlink" title="ROIAlign"></a>ROIAlign</h2><p>ROI Pooling经历了两个量化的过程：</p>
+<ul>
+<li>从RPN预测的ROI proposal到feature map的映射过程。若映射的结果不在feature map的整数位上，比如x/16不是整数，则ROI pooling需要四舍五入至整数。</li>
+<li></li>
+<li>在feature map划分成k*k的区域，在分区域过程也需取整。对每个区域使用max pooling。</li>
+</ul>
+<p>这两个过程都损失了ROI区域内的特征。</p>
+<p>而做分割是像素级别的，损失这些特征就无法很好地预测。</p>
+<p>ROIAlign取消量化的方法是使用双线性插值计算非整数坐标部分的特征。<br>若ROI proposal映射到feature map时，不进行四舍五入取整而是保留小数区域。如下图所示：</p>
+<p><img src="/images/a7be05c51ff94598a337d21198b434503781c7399340395d5eb876d61df41cab.png" alt="picture 7"> </p>
+<p>并与ROI pooling相同，若需要输出k<em>k个数，则平均分为面积相等的k\</em>k个区域。在分区域时也不进行取整。如下图所示： </p>
+<p><img src="/images/023c6069a4f12bb01b586c76f249c797e050cf5888f7d0532f534468ddf6f77b.png" alt="picture 8">  </p>
+<p>之后对每个区域进行若干点采样，若采样点数量为4，则如下图所示，对每个点使用双线性插值的方法计算采样点处的特征值。最后再对每个区域内的采样点做max pooling即可输出k*k个值。</p>
+<p><img src="/images/e0bd337049be254942e6f6ded617cd932bb313a5b1b94dddb22b4e48ddf31642.png" alt="picture 9">  </p>
+<h2 id="FPN"><a href="#FPN" class="headerlink" title="FPN"></a>FPN</h2><p><img src="/images/4ca0837c32848914fd5a4437787bfcf78bd46755fc5055e778de3cb979dff0ce.png" alt="picture 3">  </p>
+<h4 id="在RPN中使用FPN"><a href="#在RPN中使用FPN" class="headerlink" title="在RPN中使用FPN"></a>在RPN中使用FPN</h4><p>在Faster—RCNN中，RPN负责预测可能出现物体的ROI，方法是对feature map中每一个位置假设存在多个尺寸的anchor box。但使用FPN后，可假设每个输出中的像素含有一个尺寸的anchor box，而不必假设每个输出有多个尺寸的anchor box。<br><img src="/images/fd95ff35f4fa973cc9bfe206f23d026a55e198b36881c01fe3a8dde177b8a386.png" alt="picture 4">  </p>
+<h4 id="在Fast-RCNN中使用FPN"><a href="#在Fast-RCNN中使用FPN" class="headerlink" title="在Fast-RCNN中使用FPN"></a>在Fast-RCNN中使用FPN</h4><p>Fast-RCNN的ROIpooling之前，需要提取特征为feature map，现在可以根据FPN的不同尺度的feature map作为后续计算。若ROI较大，则使用更深的feature map输入ROI pooling，否则就输入浅层feature map。根据以下公式确定使用哪一个feature map进行后续计算：</p>
+<script type="math/tex; mode=display">
+k=\left\lfloor k_{0}+\log _{2}(\sqrt{w h} / 224)\right\rfloor</script><p>224为imageNet的图片尺寸。k0是基准值，设置为5，代表P5层的输出（原图大小就用P5层），w和h是ROI区域的长和宽，假设ROI是112 * 112的大小，那么k = k0-1 = 5-1 = 4，意味着该ROI应该使用P4的特征层。k值应该会做取整处理，防止结果不是整数。</p>
+<h4 id="整个Mask-RCNN的结构示意图如下："><a href="#整个Mask-RCNN的结构示意图如下：" class="headerlink" title="整个Mask-RCNN的结构示意图如下："></a>整个Mask-RCNN的结构示意图如下：</h4><p><img src="/images/7a3562d528e59f8cdc42abf426fc830646f9aa54447d75578b8c556d9b394d29.png" alt="picture 5">  </p>
+<p>其中FPN作为特征提取的主干网络，输出多个尺度的feature map，RPN使用这些feature map，在每个位置使用同一尺寸的anchor box，预测可能出现物体的ROI。根据ROI的大小，确定用来计算的FPN的feature map进行后续的ROI Align和输出。</p>
+<h4 id="FPN与U-Net的区别"><a href="#FPN与U-Net的区别" class="headerlink" title="FPN与U-Net的区别"></a>FPN与U-Net的区别</h4><ul>
+<li>FPN用来detection；U-Net用来segmentation。</li>
+<li>FPN的“放大”部分是直接插值放大的，没有学习参数；U-Net“放大”部分就是需要使用反卷积上采样，需要学习参数。</li>
+<li>FPN及其大多数改进都是把原Feature Map和FPN的Feature Map做加法；U-Net及其大多数改进都是把原Feature Map和Decoder的Feature Map做Concatiantion，再做1x1卷积。</li>
+<li>FPN对每一个融合的层都做detection；U-Net 只在最后一层做segmentation的pixel预测。</li>
+</ul>
+<h2 id="损失函数"><a href="#损失函数" class="headerlink" title="损失函数"></a>损失函数</h2><script type="math/tex; mode=display">
+L=L_{c l s}+L_{b o x}+L_{m a s k}</script><p>前两项与Faster-RCNN相同，第三项$L_{mask}$为Faster-RCNN部分预测的ROI中，FCN对这些ROI区域的每个像素的分类结果。而FCN部分只考虑对Faster-RCNN预测出的分类结果做像素分类，而不像FCN需要在分割的同时进行像素分类。</p>
+<hr>
+<h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><p><a href="https://blog.csdn.net/qq_36269513/article/details/80420363" target="_blank" rel="noopener">https://blog.csdn.net/qq_36269513/article/details/80420363</a><br><a href="https://blog.csdn.net/u010901792/article/details/100044200" target="_blank" rel="noopener">https://blog.csdn.net/u010901792/article/details/100044200</a><br><a href="https://zhuanlan.zhihu.com/p/44741620" target="_blank" rel="noopener">https://zhuanlan.zhihu.com/p/44741620</a><br><a href="https://www.zhihu.com/question/351279839" target="_blank" rel="noopener">https://www.zhihu.com/question/351279839</a><br><a href="https://blog.csdn.net/qq_33547191/article/details/88695405" target="_blank" rel="noopener">https://blog.csdn.net/qq_33547191/article/details/88695405</a><br><a href="https://www.cnblogs.com/hellcat/p/9814975.html" target="_blank" rel="noopener">https://www.cnblogs.com/hellcat/p/9814975.html</a></p>
+</div></article><div class="p-info box"><span class="p-tags"><i class="fa fa-tag"></i><a href="/tags/语义分割/">语义分割</a></span></div></div><section class="p-ext"><div class="l-pager l-pager-dtl box"><a class="next" href="/post/79989519.html">【算法笔记】目标检测之YOLO系列v1v2v3 &gt;</a></div><div id="valine-comment"><style type="text/css">.v * { color: #CECECE; }
+.v a { color: #0F9FB4; }
+.v a:hover { color: #216C73; }
+.v li { list-style: inherit; }
+.v .vwrap { border: 1px solid #223441; border-radius: 0; }
+.v .vwrap:hover { box-shadow: 0 0 6px 1px #223441; }
+.v .vbtn { border-radius: 0; color: #cecece; background: none; }
+.v .vlist .vcard .vh { border-bottom-color: #293D4E; }
+.v .vwrap .vheader .vinput { border-bottom-color: #223441; }
+.v .vwrap .vheader .vinput:focus { border-bottom-color: #339EB4; }
+.v code, .v pre,.v .vlist .vcard .vhead .vsys { background: #203240; }
+.v .vlist .vcard .vcontent.expand:before { background: linear-gradient(180deg,hsla(206,33%,19%,0),hsla(206,33%,19%,.9)); }
+.v .vlist .vcard .vcontent.expand:after { background: hsla(206,33%,19%,.9); }</style><div id="vcomment"></div><script src="//cdn1.lncld.net/static/js/3.0.4/av-min.js"></script><script src="//unpkg.com/valine@1.4.0/dist/Valine.min.js"></script><script>var notify = 'true' == true ? true : false;
+var verify = 'false' == true ? true : false;
+var GUEST_INFO = ['nick','mail','link'];
+var guest_info = 'nick,mail,link'.split(',').filter(function(item){
+  return GUEST_INFO.indexOf(item) > -1
+});
+guest_info = guest_info.length == 0 ? GUEST_INFO :guest_info;
+window.valine = new Valine({
+  el:'#vcomment',
+  notify:notify,
+  verify:verify,
+  appId:'faWhCflfYAf4DSBY6i31K1r7-gzGzoHsz',
+  appKey:'CKuisu7G1GD4VMH48mNdbWjX',
+  placeholder:'无需注册，随便说的什么吧，留下邮箱的话，被回复会有邮件提醒哦ヾ(o◕∀◕)ﾉヾ',
+  avatar:'identicon',
+  guest_info:guest_info,
+  pageSize:'10'
+})</script></div><script type="text/x-mathjax-config">MathJax.Hub.Config({
+  tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]}
+  });
+</script><script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-MML-AM_CHTML" async></script></section><footer><p>Copyright © 2016 - 2021 <a href="/." rel="nofollow">YOYO</a><br><span id="busuanzi_container_site_uv"><i class="fa fa-user"></i><span id="busuanzi_value_site_uv"></span></span> <span id="busuanzi_container_site_pv"><i class="fa fa-eye"></i><span id="busuanzi_value_site_pv"></span></span> | Powered by<a rel="nofollow" target="_blank" href="https://hexo.io"> Hexo.</a>Theme with<a rel="nofollow" target="_blank" href="https://github.com/litreily/snark-hexo"> snark.</a></p></footer></div></div></div><script type="text/javascript" src="/plugins/prettify/prettify.js"></script><script type="text/javascript" src="/js/search.js"></script><script type="text/javascript" src="/js/top.js"></script><script type="text/javascript" src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js" async></script><script>var search_path = 'search.xml';
+if (search_path.length == 0) {
+    search_path = 'search.xml';
+}
+var path = '/' + search_path;
+searchFunc(path, 'local-search-input', 'local-search-result');
+</script><script type="text/javascript" src="//cdn.bootcss.com/fancybox/3.3.5/jquery.fancybox.min.js" async></script><script type="text/javascript" src="/js/fancybox.js?v=0.0.1" async></script><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/3.3.5/jquery.fancybox.min.css"></body></html>
